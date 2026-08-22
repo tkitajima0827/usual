@@ -75,23 +75,32 @@ MFクラウド会計など外部ソースから月次実績を取り込むため
 - 動作確認用CLI: `npm run import:actuals -- --client "顧客名" --file <正規化JSON>`
   （サンプル: `fixtures/mf-import-example.json` で動作検証済み。新規科目作成・upsertの冪等性を確認済み）
 
-### MF連携の現状（ブロッカー）
+### MFクラウド会計アダプタ（`src/lib/import/mfCloudAdapter.ts`）— 実装済み・実データで検証済み
 
-「マネーフォワード クラウド会計」コネクタ（MCP）はorg単位では登録されているが、本セッション（GitHubリポジトリに
-紐づくリモート実行環境）では `enabledInChat: false` のため呼び出せない。また、対話セッション前提のMCP接続は、
-デプロイ後のWebアプリが人手を介さず自動的・継続的に全顧客分を同期する用途には本質的に向かない
-（実行のたびにClaudeセッションが必要になる）。
+「マネーフォワード クラウド会計」MCPコネクタが本セッションで有効化されたため、当面は以下の運用で連携する
+（事業者切替が容易になり次第、公式API(OAuth2)へ移行予定。MCP接続は対話セッション前提のため、Claudeが
+手動またはRoutine（定期実行）でデータを取得し、DBへ流し込む運用になる）:
 
-進めるには次のいずれかが必要:
+1. Claudeが `mfc_ca_getAccounts`（勘定科目マスタ）と `mfc_ca_getReportsTransitionProfitLoss`
+   （月次推移表PL、`type=monthly`）をMCP経由で取得し、生JSONをファイルに保存する
+   （実データのため git管理外のスクラッチ領域に保存し、リポジトリにはコミットしない）。
+2. `convertMfTransitionPlToActualImportRows()` が、取得したJSON（勘定科目ツリー構造）を
+   `ActualImportRow[]` に変換する。変換ロジック:
+   - 勘定科目マスタの `account_group`/`category` を本システムの `PLCategory` にマッピング
+     （`NET_SALES→REVENUE`、`COST_OF_PURCHASED_GOODS→COGS`、`SELLING_GENERAL_AND_ADMINISTRATIVE_EXPENSES→SGA` 等）
+   - `type: "account"` ノードの値をそのまま使用し、`sub_account`（補助科目）の内訳には個別には立ち入らない
+     （親科目の値に既に合算されているため。補助科目単位の取込は本システムのデータモデルが対応するまでの将来対応）
+   - `settlement_balance`（決算整理仕訳）は会計期間の最終月に合算する
+   - `financial_statement_type: "BALANCE_SHEET"` の科目、勘定科目マスタに見つからない科目、
+     未対応カテゴリの科目はスキップまたは警告付きで分類未設定として取り込む
+3. `scripts/import-mf-transition-pl.ts` で `importMonthlyActuals()` に渡しDBへ反映する。
 
-1. このチャット/セッションでコネクタを有効化する（claude.ai側のコネクタ設定）。認可自体（MoneyForwardへの
-   ログイン・事業者選択）は北島様ご自身のブラウザで完結させていただく必要がある（パスワード・二段階認証は
-   Claudeが代行すべきではないため）。有効化後、Claudeが手動またはRoutine（定期実行）でMCP経由のデータを
-   `importMonthlyActuals()` に流し込む運用になる。
-2. MFクラウド会計の試算表CSVエクスポートのサンプルファイルを共有いただく。実際の列構成に合わせて
-   CSV→`ActualImportRow[]`変換アダプタを実装する。
-3. 本格的な自動連携が必要な場合は、MFクラウド会計の公式API（OAuth2、開発者ポータルでのアプリ登録が必要）を
-   別途検討する。
+実際に自社（ステラリンクスグループ）の2023〜2026年度のMFクラウド会計データで動作検証済み。
+37勘定科目・1,500件の月次実績を取り込み、MF側の年間合計（`total`列）と1円単位で一致することを確認した
+（決算整理仕訳を含む減価償却費のケースも含む）。単体テストは `src/lib/import/mfCloudAdapter.test.ts` を参照。
+
+CSVエクスポートや公式APIなど、別のデータソースを使う場合も `ActualImportRow[]` に変換するアダプタを
+追加すれば同じ `importMonthlyActuals()` で取り込める。
 
 ## 画面
 
@@ -105,7 +114,7 @@ MFクラウド会計など外部ソースから月次実績を取り込むため
 
 1. **5年間の中期経営計画（BS/PL/CF連動）** — 単年度計画を5期分つなげる仕組み、BS・CFの自動連動ロジック
 2. **消費税・法人税の概算計算** — `Client.taxMethod`（税込/税抜）は用意済み。税込経理時の租税公課計上、消費税・法人税の概算納税予測は未着手
-3. **MFクラウド会計からのデータ取込** — 正規化レイヤー（`importMonthlyActuals`）は実装済み。CSV/API/MCPいずれかの実データソースへの接続は「MF連携の現状（ブロッカー）」参照
+3. **MFクラウド会計からのデータ取込** — MCP経由のアダプタを実装し実データで検証済み（「MFクラウド会計アダプタ」参照）。定期実行の自動化（Routine化）と、事業者切替が容易になった後の公式API(OAuth2)への移行は今後の課題
 4. **複数顧客の集計・トレンド可視化ダッシュボード** — 全顧客の黒字化率・成長率などの集計グラフ
 5. **売掛・買掛金の回収・支払サイト設定** — 標準サイトの初期設定＋相手先・売上分類ごとの個別例外設定
 6. **認証・権限制御** — `User.role`によるロール設計はスキーマに用意済みだが、ログイン機能・権限チェックは未実装
