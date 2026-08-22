@@ -1,7 +1,15 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getClients } from "@/lib/queries";
+import { isFirmRole, verifySession } from "@/lib/auth/dal";
 
 export default async function HomePage() {
+  const session = await verifySession();
+  // 顧客側ユーザーは自社の計画にしか用が無いため、一覧を経由せず直接自社ページへ誘導する
+  if (!isFirmRole(session.role)) {
+    redirect(`/clients/${session.clientId}`);
+  }
+
   const clients = await getClients();
 
   return (

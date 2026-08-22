@@ -7,6 +7,7 @@ import { PlanTable } from "@/components/PlanTable";
 import { TaxEstimateCard } from "@/components/TaxEstimateCard";
 import { CashScheduleCard } from "@/components/CashScheduleCard";
 import { MONTH_LABELS } from "@/lib/format";
+import { requireClientAccess } from "@/lib/auth/dal";
 
 export default async function PlanPage({
   params,
@@ -14,8 +15,11 @@ export default async function PlanPage({
   params: Promise<{ clientId: string; fiscalYearId: string }>;
 }) {
   const { clientId, fiscalYearId } = await params;
+  await requireClientAccess(clientId);
   const data = await getPlanViewModel(fiscalYearId).catch(() => null);
-  if (!data) notFound();
+  // fiscalYearIdがURLのclientIdと異なる顧客のものである可能性があるため、
+  // 実際に紐づく顧客と一致するかも必ず確認する（他顧客のデータ漏洩を防ぐ）
+  if (!data || data.client.id !== clientId) notFound();
 
   const revenueRow = data.categories.find((c) => c.category === "REVENUE");
   const salesTrend =
