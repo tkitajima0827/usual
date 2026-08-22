@@ -245,9 +245,31 @@ Next.js公式ドキュメントが推奨する構成（Stateless Session + Data 
 
 未実装・今後の課題:
 
-- サインアップ画面・パスワード変更/リセット機能（現状はシードスクリプトでのみユーザー作成可能）
+- サインアップ画面・パスワード変更/リセット機能（現状はCLI/管理用APIでのみユーザー作成可能）
 - `CLIENT_ADMIN`と`CLIENT_USER`の権限差（現状は両方とも同じ操作が可能）
 - 監査ログ（誰がいつ何を変更したか）
+
+## 管理用API — `src/app/api/admin/*`
+
+本番環境（Vercel）はデプロイ元のネットワーク環境からデータベースへ直接接続できない場合がある
+（本セッションの開発サンドボックスがまさにこのケース）。ブラウザのログインセッションを経由せず、
+外部ツール（データ移行スクリプト、Claudeによる代行入力など）から顧客データを投入するための
+最小限のHTTP API。
+
+- 認証はセッションCookieではなく、環境変数 `ADMIN_API_TOKEN` と一致する `Authorization: Bearer <token>`
+  ヘッダーで行う（`src/lib/adminApi/auth.ts`）。未設定時は常に拒否（fail closed）。
+  `src/proxy.ts` は `/api/*` 配下をCookieチェックの対象外にしている（各Route Handlerが個別に認可する）。
+- `POST /api/admin/clients` — 顧客作成（`{ name, fiscalYearStartMonth, taxMethod }`）。
+  `scripts/create-client.ts` と同じロジック。
+- `POST /api/admin/users` — ログインユーザー作成（`{ email, name, role, password, clientId? }`）。
+  `scripts/create-user.ts` と同じロジック。
+- `POST /api/admin/fiscal-years` — 会計年度の作成+全PL科目を「過去平均」で初期設定
+  （`{ clientId, startYear, startMonth, label? }`）。`scripts/create-default-plan.ts` と同じロジック。
+- `POST /api/admin/actuals` — 正規化済み月次実績の取込（`{ clientId, rows: ActualImportRow[] }`）。
+  `scripts/import-actuals.ts` と同じ `importMonthlyActuals()` を使用。
+
+このトークンは強力な権限（任意のユーザー・任意のロールの作成を含む）を持つため、Vercelの
+環境変数以外の場所（コード、チャット履歴、公開リポジトリ等）に平文で残さないよう注意すること。
 
 ## 画面
 

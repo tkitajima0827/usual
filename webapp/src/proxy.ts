@@ -13,6 +13,13 @@ function isPublicPath(pathname: string): boolean {
 // より厳密な認可（顧客ごとのスコープ制御など）はsrc/lib/auth/dal.tsのrequireClientAccess()で行う。
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // /api/* はブラウザセッション（Cookie）ではなくBearerトークンで各Route Handlerが
+  // 個別に認可するため、ここでのCookieチェック（/loginへのリダイレクト）は対象外にする。
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.next();
+  }
+
   const session = await readSession();
 
   if (!isPublicPath(pathname) && !session) {
