@@ -1,0 +1,293 @@
+// SBI証券 取引損益・仕訳生成アプリ データモデル
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ---------- テナント / ユーザー ----------
+
+model Business {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships    Membership[]
+  fiscalPeriods  FiscalPeriod[]
+  securities     Security[]
+  openingBalances OpeningBalance[]
+  trades         Trade[]
+  ledgerEntries  CostLedgerEntry[]
+  monthEndPrices MonthEndPrice[]
+  valuations     Valuation[]
+  journalEntries JournalEntry[]
+  importBatches  ImportBatch[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  isAdmin      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  memberships Membership[]
+}
+
+enum MembershipRole {
+  ADMIN
+  MEMBER
+}
+
+model Membership {
+  id         String         @id @default(cuid())
+  userId     String
+  businessId String
+  role       MembershipRole @default(MEMBER)
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, businessId])
+}
+
+// ---------- 会計期間 ----------
+
+model FiscalPeriod {
+  id         String   @id @default(cuid())
+  businessId String
+  label      String // 例: 26.02月期
+  startDate  DateTime
+  endDate    DateTime
+
+  business        Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  openingBalances OpeningBalance[]
+  trades          Trade[]
+  ledgerEntries   CostLedgerEntry[]
+  monthEndPrices  MonthEndPrice[]
+  valuations      Valuation[]
+  journalEntries  JournalEntry[]
+  importBatches   ImportBatch[]
+
+  @@unique([businessId, label])
+}
+
+// ---------- 銘柄マスタ ----------
+
+model Security {
+  id         String @id @default(cuid())
+  businessId String
+  code       String // 銘柄コード (例 9433)
+  name       String // 銘柄名
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  openingBalances OpeningBalance[]
+  trades          Trade[]
+  ledgerEntries   CostLedgerEntry[]
+  monthEndPrices  MonthEndPrice[]
+  valuations      Valuation[]
+
+  @@unique([businessId, code])
+}
+
+// ---------- 期首残高 ----------
+
+model OpeningBalance {
+  id             String @id @default(cuid())
+  businessId     String
+  fiscalPeriodId String
+  securityId     String
+
+  spotQuantity   Int    @default(0) // 現物株数
+  spotBookValue  Int    @default(0) // 現物取得価額
+  marginLongQuantity  Int @default(0) // 信用買建株数
+  marginLongBookValue Int @default(0) // 信用買建代金(取得価額)
+  marginShortQuantity  Int @default(0) // 信用売建株数
+  marginShortBookValue Int @default(0) // 信用売建代金(売付時の受渡代金)
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fiscalPeriod FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  security     Security     @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
+  @@unique([fiscalPeriodId, securityId])
+}
+
+// ---------- 取込バッチ ----------
+
+enum ImportKind {
+  TRADE_HISTORY // 約定履歴(元データ)
+  CASH_FLOW // 入出金明細
+}
+
+model ImportBatch {
+  id             String     @id @default(cuid())
+  businessId     String
+  fiscalPeriodId String
+  kind           ImportKind
+  fileName       String
+  month          String // "2026-02" のような対象月
+  createdAt      DateTime   @default(now())
+  rowCount       Int        @default(0)
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fiscalPeriod FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  trades       Trade[]
+}
+
+// ---------- 取引(元データを正規化したもの) ----------
+
+enum TransactionType {
+  SPOT_BUY // 株式現物買
+  SPOT_SELL // 株式現物売
+  MARGIN_OPEN_BUY // 信用新規買
+  MARGIN_OPEN_SELL // 信用新規売
+  MARGIN_CLOSE_BUY // 信用返済買
+  MARGIN_CLOSE_SELL // 信用返済売
+  ASSIGN_BUY // 現引(信用買建→現物)
+  ASSIGN_SELL // 現渡(信用売建→現物で決済)
+}
+
+model Trade {
+  id             String          @id @default(cuid())
+  businessId     String
+  fiscalPeriodId String
+  importBatchId  String?
+  securityId     String
+
+  tradeDate       DateTime // 約定日
+  settlementDate  DateTime? // 受渡日
+  market          String? // 市場
+  transactionType TransactionType
+  termType        String? // 期限(6ヶ月等)
+  quantity        Int // 約定数量
+  unitPrice       Float // 約定単価
+  fee             Int    @default(0) // 手数料/諸経費等
+  tax             Int    @default(0) // 税額
+  settlementAmount Int?  // 受渡金額/決済損益 (SBI元データそのまま)
+  note            String?
+
+  createdAt DateTime @default(now())
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fiscalPeriod FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  importBatch  ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  security     Security     @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
+  ledgerEntries  CostLedgerEntry[]
+  journalEntries JournalEntry[]
+
+  @@index([businessId, fiscalPeriodId, securityId])
+}
+
+// ---------- 移動平均法 原価台帳(取引ごとの計算結果) ----------
+
+enum LotType {
+  SPOT
+  MARGIN_LONG
+  MARGIN_SHORT
+}
+
+model CostLedgerEntry {
+  id             String  @id @default(cuid())
+  businessId     String
+  fiscalPeriodId String
+  securityId     String
+  tradeId        String
+
+  lotType          LotType
+  quantityDelta    Int // 数量増減
+  quantityAfter    Int // 処理後の残数量
+  avgUnitCostAfter Float // 処理後の平均単価
+  bookValueAfter   Int // 処理後の取得価額残高
+
+  realizedGain Int? // 実現損益(決済/売却時のみ)
+
+  createdAt DateTime @default(now())
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fiscalPeriod FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  security     Security     @relation(fields: [securityId], references: [id], onDelete: Cascade)
+  trade        Trade        @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, fiscalPeriodId, securityId])
+}
+
+// ---------- 月末株価・時価評価 ----------
+
+model MonthEndPrice {
+  id             String @id @default(cuid())
+  businessId     String
+  fiscalPeriodId String
+  securityId     String
+  month          String // "2026-02"
+  unitPrice      Float
+  source         String? // 取得元メモ(手入力/URL等)
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fiscalPeriod FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  security     Security     @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
+  @@unique([fiscalPeriodId, securityId, month])
+}
+
+model Valuation {
+  id             String @id @default(cuid())
+  businessId     String
+  fiscalPeriodId String
+  securityId     String
+  month          String
+
+  quantity    Int
+  bookValue   Int
+  unitPrice   Float
+  marketValue Int
+  gainLoss    Int
+
+  createdAt DateTime @default(now())
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fiscalPeriod FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  security     Security     @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
+  @@unique([fiscalPeriodId, securityId, month])
+}
+
+// ---------- 仕訳 ----------
+
+enum JournalSourceType {
+  TRADE
+  VALUATION
+  OPENING
+}
+
+model JournalEntry {
+  id             String   @id @default(cuid())
+  businessId     String
+  fiscalPeriodId String
+  tradeId        String?
+  month          String // "2026-02"
+  date           DateTime
+
+  debitAccount    String
+  debitSubAccount String?
+  debitAmount     Int
+  creditAccount   String
+  creditSubAccount String?
+  creditAmount    Int
+  memo            String
+
+  sourceType JournalSourceType
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fiscalPeriod FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Cascade)
+  trade        Trade?       @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, fiscalPeriodId, month])
+}
