@@ -42,6 +42,36 @@ SESSION_SECRET="openssl rand -base64 32 等で生成した値"
 - 事務所担当者（全顧客にアクセス可）: `staff@stella-l.com`
 - 顧客担当者（自社データのみアクセス可）: `client-admin@test-kk.example.com`
 
+## 本番デプロイ（Vercel + 永続Postgres）
+
+現時点では実装のみで、実際のデプロイ作業（Vercelアカウントの用意、DBの契約、環境変数の設定）は
+未実施。以下の手順で常設URLを用意できる（無料枠の範囲で開始可能）。
+
+1. **データベースを用意する**（例: [Neon](https://neon.tech)）
+   - Neonでプロジェクトを作成し、「Pooled connection」の接続文字列（`-pooler`が付くもの。
+     サーバーレス環境からの大量の同時接続に対応するため）を控える。
+   - Supabase等の他のマネージドPostgresでも同様の手順で利用できる。
+2. **GitHubリポジトリをVercelに接続する**
+   - [Vercel](https://vercel.com)でアカウントを作成し、「New Project」からこのリポジトリを選択。
+   - Root Directoryに `webapp` を指定する（リポジトリ直下ではなく`webapp/`がNext.jsアプリのため）。
+3. **環境変数を設定する**（Vercelプロジェクトの Settings → Environment Variables）
+   - `DATABASE_URL`: 手順1で控えた接続文字列
+   - `SESSION_SECRET`: `openssl rand -base64 32` で生成した値（ローカルの`.env`とは別の値を推奨）
+4. **マイグレーションを適用する**（初回・スキーマ変更時）
+   - ローカルから本番DBに向けて実行: `DATABASE_URL="<本番の接続文字列>" npx prisma migrate deploy`
+   - 自動ビルドには含めていない（プレビュー環境のビルドが誤って本番DBに影響しないようにするため）。
+5. **デプロイ**
+   - Vercelが自動でビルド・デプロイし、`https://<プロジェクト名>.vercel.app` のようなURLが発行される
+     （後から独自ドメインも設定可能）。
+6. **ログインユーザーを作成する**
+   - シードスクリプトはテスト株式会社向けのデモデータのみを作成するため、実際の顧客・ユーザーは
+     `scripts/create-client.ts`（顧客作成）と `scripts/create-user.ts`（ログインユーザー作成、
+     `npm run user:create -- --email "..." --name "..." --role FIRM_STAFF --password "..."`）を
+     使って作成する（画面からのユーザー登録UIは今回のスコープ外）。
+
+`package.json`の`postinstall`で`prisma generate`を実行するようにしているため、Vercelの
+ビルド時にも生成済みPrismaクライアント（gitignore対象）が正しく作られる。
+
 ## テスト
 
 ```bash

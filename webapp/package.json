@@ -8,10 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "postinstall": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
     "import:actuals": "tsx scripts/import-actuals.ts",
     "import:mf-transition-pl": "tsx scripts/import-mf-transition-pl.ts",
-    "client:create": "tsx scripts/create-client.ts"
+    "client:create": "tsx scripts/create-client.ts",
+    "user:create": "tsx scripts/create-user.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
