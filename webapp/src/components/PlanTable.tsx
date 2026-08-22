@@ -117,6 +117,15 @@ export function PlanTable({ data }: { data: PlanViewModel }) {
                   warnings={row.warnings}
                   accountOptions={accountOptions}
                   consumptionTaxCategory={row.consumptionTaxCategory}
+                  plCategory={group.category}
+                  settlementTermOverride={row.settlementTermOverride}
+                  defaultSettlementTerm={
+                    group.category === "REVENUE"
+                      ? data.cashSchedule.defaultTerms.receivable
+                      : group.category === "COGS"
+                        ? data.cashSchedule.defaultTerms.payable
+                        : undefined
+                  }
                 />
               ))}
               {group.category === "COGS" && (

@@ -2,6 +2,11 @@ import { prisma } from "@/lib/db";
 import { addMonths, calculatePlan, ymKey, type PlanEntryInput, type YearMonth } from "@/lib/calc/engine";
 import { PL_CATEGORY_LABEL } from "@/lib/labels";
 import { estimateConsumptionTax, estimateCorporateTax, estimateInterimPayment } from "@/lib/tax/estimate";
+import {
+  buildSettlementSchedule,
+  resolveSettlementTerm,
+  type SettlementTerm,
+} from "@/lib/cashflow/settlementSchedule";
 
 export async function getClients() {
   return prisma.client.findMany({ orderBy: { name: "asc" } });
@@ -9,6 +14,72 @@ export async function getClients() {
 
 export async function getClient(clientId: string) {
   return prisma.client.findUniqueOrThrow({ where: { id: clientId } });
+}
+
+export interface CounterpartyViewModel {
+  id: string;
+  name: string;
+  direction: "RECEIVABLE" | "PAYABLE";
+  accountId: string | null;
+  accountName: string | null;
+  closingDay: number;
+  monthsAfter: number;
+  settlementDay: number;
+}
+
+export interface SettlementSettingsViewModel {
+  client: { id: string; name: string };
+  defaultTerms: { receivable: SettlementTerm; payable: SettlementTerm };
+  counterparties: CounterpartyViewModel[];
+  /** 相手先登録フォームの「主にどの科目に紐づくか」選択肢（売上高/売上原価科目のみ） */
+  accountOptions: { id: string; name: string; direction: "RECEIVABLE" | "PAYABLE" }[];
+}
+
+/** クライアント単位の回収・支払サイト設定（既定サイト・相手先マスタ）を取得する */
+export async function getSettlementSettings(clientId: string): Promise<SettlementSettingsViewModel> {
+  const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
+  const defaultRows = await prisma.defaultSettlementTerm.findMany({ where: { clientId } });
+  const byDirection = new Map(
+    defaultRows.map((t) => [
+      t.direction,
+      { closingDay: t.closingDay, monthsAfter: t.monthsAfter, settlementDay: t.settlementDay },
+    ]),
+  );
+  const fallback: SettlementTerm = { closingDay: 31, monthsAfter: 1, settlementDay: 31 };
+
+  const counterpartyRows = await prisma.counterparty.findMany({
+    where: { clientId },
+    include: { account: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const revenueAndCogsAccounts = await prisma.account.findMany({
+    where: { clientId, isActive: true, plCategory: { in: ["REVENUE", "COGS"] } },
+    orderBy: { sortOrder: "asc" },
+  });
+
+  return {
+    client: { id: client.id, name: client.name },
+    defaultTerms: {
+      receivable: byDirection.get("RECEIVABLE") ?? fallback,
+      payable: byDirection.get("PAYABLE") ?? fallback,
+    },
+    counterparties: counterpartyRows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      direction: c.direction,
+      accountId: c.accountId,
+      accountName: c.account?.name ?? null,
+      closingDay: c.closingDay,
+      monthsAfter: c.monthsAfter,
+      settlementDay: c.settlementDay,
+    })),
+    accountOptions: revenueAndCogsAccounts.map((a) => ({
+      id: a.id,
+      name: a.name,
+      direction: a.plCategory === "REVENUE" ? ("RECEIVABLE" as const) : ("PAYABLE" as const),
+    })),
+  };
 }
 
 export async function getFiscalYears(clientId: string) {
@@ -41,6 +112,8 @@ export interface PlanAccountRow {
   warnings: string[];
   /** 消費税の課税区分（課税/非課税/対象外）。概算計算の対象科目の絞り込みに使う */
   consumptionTaxCategory: string;
+  /** 回収・支払サイトの個別設定（未設定ならnull、事業者共通の既定サイトを使う） */
+  settlementTermOverride: SettlementTerm | null;
 }
 
 export interface PlanCategoryGroup {
@@ -76,6 +149,17 @@ export interface TaxEstimateViewModel {
   consumptionTaxInterim: number | null;
 }
 
+export interface CashScheduleViewModel {
+  /** 事業者共通の既定サイト（未登録の場合はフォールバック値を表示用に返す） */
+  defaultTerms: { receivable: SettlementTerm; payable: SettlementTerm };
+  /** 月次の入金予定（売上高科目を回収サイトでシフトした金額の合計） */
+  collections: number[];
+  /** 月次の支払予定（売上原価科目を支払サイトでシフトした金額の合計） */
+  payments: number[];
+  /** collections - payments */
+  net: number[];
+}
+
 export interface PlanViewModel {
   client: { id: string; name: string };
   fiscalYear: { id: string; label: string; startYear: number; startMonth: number };
@@ -90,6 +174,7 @@ export interface PlanViewModel {
     netIncome: PlanSubtotal; // 当期純利益
   };
   taxEstimate: TaxEstimateViewModel;
+  cashSchedule: CashScheduleViewModel;
   errors: string[];
 }
 
@@ -200,6 +285,16 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
           priorYearTotal: priorYearKnown.length > 0 ? priorYearKnown.reduce((a, b) => a + b, 0) : null,
           warnings: computed.warnings,
           consumptionTaxCategory: account.consumptionTaxCategory,
+          settlementTermOverride:
+            account.settlementClosingDay != null &&
+            account.settlementMonthsAfter != null &&
+            account.settlementDay != null
+              ? {
+                  closingDay: account.settlementClosingDay,
+                  monthsAfter: account.settlementMonthsAfter,
+                  settlementDay: account.settlementDay,
+                }
+              : null,
         };
       });
     const monthTotals = sumArrays(
@@ -288,6 +383,70 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
     ratePercent: consumptionTaxRatePercent,
   });
 
+  // 回収・支払サイト: 売上高(REVENUE)科目は回収サイトで、売上原価(COGS)科目は
+  // 支払サイトで、それぞれ発生月から入出金予定月へシフトして月次に集計する。
+  // 年度開始前に発生し、年度初月以降に着金/支払する分（繰越）も反映するため、
+  // 実績データから遡って参照する。
+  const defaultSettlementTermRows = await prisma.defaultSettlementTerm.findMany({
+    where: { clientId: fiscalYear.clientId },
+  });
+  const defaultTermByDirection = new Map(
+    defaultSettlementTermRows.map((t) => [
+      t.direction,
+      { closingDay: t.closingDay, monthsAfter: t.monthsAfter, settlementDay: t.settlementDay },
+    ]),
+  );
+  const receivableDefault = defaultTermByDirection.get("RECEIVABLE") ?? null;
+  const payableDefault = defaultTermByDirection.get("PAYABLE") ?? null;
+
+  const SETTLEMENT_LOOKBACK_MONTHS = 3;
+  function accountSourceMonths(accountId: string, computedMonths: { year: number; month: number; amount: number }[]) {
+    const priorMonths: { year: number; month: number; amount: number }[] = [];
+    for (let i = SETTLEMENT_LOOKBACK_MONTHS; i >= 1; i--) {
+      const ym = addMonths(rawMonths[0], -i);
+      const amount = actuals.get(accountId)?.get(ymKey(ym.year, ym.month));
+      if (amount !== undefined) priorMonths.push({ year: ym.year, month: ym.month, amount });
+    }
+    return [...priorMonths, ...computedMonths];
+  }
+
+  let collections = new Array(12).fill(0);
+  let payments = new Array(12).fill(0);
+  for (const account of accounts) {
+    const computed = resultByAccount.get(account.id);
+    if (!computed) continue;
+    if (account.plCategory !== "REVENUE" && account.plCategory !== "COGS") continue;
+
+    const override = {
+      closingDay: account.settlementClosingDay,
+      monthsAfter: account.settlementMonthsAfter,
+      settlementDay: account.settlementDay,
+    };
+    const term = resolveSettlementTerm(
+      override,
+      account.plCategory === "REVENUE" ? receivableDefault : payableDefault,
+    );
+    const schedule = buildSettlementSchedule({
+      fiscalMonths: rawMonths,
+      sourceMonths: accountSourceMonths(account.id, computed.months),
+      term,
+    });
+    if (account.plCategory === "REVENUE") {
+      collections = sumArrays([collections, schedule], 12);
+    } else {
+      payments = sumArrays([payments, schedule], 12);
+    }
+  }
+  const cashSchedule: CashScheduleViewModel = {
+    defaultTerms: {
+      receivable: receivableDefault ?? { closingDay: 31, monthsAfter: 1, settlementDay: 31 },
+      payable: payableDefault ?? { closingDay: 31, monthsAfter: 1, settlementDay: 31 },
+    },
+    collections,
+    payments,
+    net: sumArrays([collections, payments.map((v) => -v)], 12),
+  };
+
   return {
     client: { id: fiscalYear.client.id, name: fiscalYear.client.name },
     fiscalYear: {
@@ -320,6 +479,7 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
       corporateTaxInterim: estimateInterimPayment(priorYearCorporateTaxAnnual),
       consumptionTaxInterim: estimateInterimPayment(priorYearConsumptionTaxAnnual),
     },
+    cashSchedule,
     errors: result.errors,
   };
 }

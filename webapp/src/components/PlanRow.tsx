@@ -3,9 +3,18 @@
 import { Fragment, useState, useTransition } from "react";
 import { updatePlanEntry } from "@/lib/actions/planEntry";
 import { updateConsumptionTaxCategory } from "@/lib/actions/taxSettings";
+import { updateAccountSettlementTerm } from "@/lib/actions/settlementTerms";
 import { CALC_METHOD_LABEL, CONSUMPTION_TAX_CATEGORY_LABEL } from "@/lib/labels";
 import { formatYen } from "@/lib/format";
 import type { CalcMethod, ConsumptionTaxCategory } from "@/generated/prisma/client";
+import type { SettlementTerm } from "@/lib/cashflow/settlementSchedule";
+
+function describeSettlementTerm(t: SettlementTerm): string {
+  const closing = t.closingDay >= 31 ? "末締め" : `${t.closingDay}日締め`;
+  const after = t.monthsAfter === 0 ? "当月" : t.monthsAfter === 1 ? "翌月" : `${t.monthsAfter}ヶ月後`;
+  const day = t.settlementDay >= 31 ? "末日" : `${t.settlementDay}日`;
+  return `${closing} ${after}${day}`;
+}
 
 // MFクラウド会計などの外部連携科目は、コードとして人間には読めないURLエンコード
 // された内部IDが入る（安定した突合キーとして採用しているため）。表示上は隠す。
@@ -76,6 +85,11 @@ export interface PlanRowProps {
   warnings: string[];
   accountOptions: { id: string; name: string }[];
   consumptionTaxCategory: string;
+  /** REVENUE/COGS科目のみ回収・支払サイトの編集UIを表示する */
+  plCategory: string;
+  settlementTermOverride: SettlementTerm | null;
+  /** 個別設定が無い場合に適用される事業者共通の既定サイト（REVENUE/COGS以外はundefined） */
+  defaultSettlementTerm?: SettlementTerm;
 }
 
 export function PlanRow(props: PlanRowProps) {
@@ -91,12 +105,25 @@ export function PlanRow(props: PlanRowProps) {
     props.consumptionTaxCategory as ConsumptionTaxCategory,
   );
 
+  const showSettlementTerm = props.plCategory === "REVENUE" || props.plCategory === "COGS";
+  const settlementFallback: SettlementTerm = props.defaultSettlementTerm ?? {
+    closingDay: 31,
+    monthsAfter: 1,
+    settlementDay: 31,
+  };
+  const [useSettlementOverride, setUseSettlementOverride] = useState(props.settlementTermOverride !== null);
+  const [settlementTerm, setSettlementTerm] = useState<SettlementTerm>(
+    props.settlementTermOverride ?? settlementFallback,
+  );
+
   function startEdit() {
     setCalcMethod(props.calcMethod as CalcMethod);
     setLinkedAccountId(props.linkedAccountId ?? "");
     setLinkedPercentage(props.linkedPercentage ?? 0);
     setDirectValues(props.months.map((m) => m.amount));
     setConsumptionTaxCategory(props.consumptionTaxCategory as ConsumptionTaxCategory);
+    setUseSettlementOverride(props.settlementTermOverride !== null);
+    setSettlementTerm(props.settlementTermOverride ?? settlementFallback);
     setError(null);
     setEditing(true);
   }
@@ -109,6 +136,9 @@ export function PlanRow(props: PlanRowProps) {
   function save() {
     setError(null);
     startTransition(async () => {
+      const nextOverride = useSettlementOverride ? settlementTerm : null;
+      const settlementChanged =
+        JSON.stringify(nextOverride) !== JSON.stringify(props.settlementTermOverride);
       const results = await Promise.all([
         updatePlanEntry({
           clientId: props.clientId,
@@ -128,6 +158,14 @@ export function PlanRow(props: PlanRowProps) {
               fiscalYearId: props.fiscalYearId,
               accountId: props.accountId,
               consumptionTaxCategory,
+            })
+          : Promise.resolve({ ok: true, error: undefined }),
+        showSettlementTerm && settlementChanged
+          ? updateAccountSettlementTerm({
+              clientId: props.clientId,
+              fiscalYearId: props.fiscalYearId,
+              accountId: props.accountId,
+              term: nextOverride,
             })
           : Promise.resolve({ ok: true, error: undefined }),
       ]);
@@ -174,6 +212,13 @@ export function PlanRow(props: PlanRowProps) {
           <div className="text-[11px] text-[var(--text-muted)]">
             消費税: {CONSUMPTION_TAX_CATEGORY_LABEL[props.consumptionTaxCategory] ?? props.consumptionTaxCategory}
           </div>
+          {showSettlementTerm && (
+            <div className="text-[11px] text-[var(--text-muted)]">
+              {props.plCategory === "REVENUE" ? "回収" : "支払"}:{" "}
+              {describeSettlementTerm(props.settlementTermOverride ?? settlementFallback)}
+              {props.settlementTermOverride ? "（個別設定）" : "（既定）"}
+            </div>
+          )}
         </td>
         <td className="px-3 py-2">
           {editing ? (
@@ -229,6 +274,55 @@ export function PlanRow(props: PlanRowProps) {
                   ))}
                 </select>
               </label>
+              {showSettlementTerm && (
+                <div className="flex flex-col gap-1 rounded border border-[var(--border-hairline)] p-1.5">
+                  <label className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
+                    <input
+                      type="checkbox"
+                      checked={useSettlementOverride}
+                      onChange={(e) => setUseSettlementOverride(e.target.checked)}
+                    />
+                    {props.plCategory === "REVENUE" ? "回収" : "支払"}サイトを個別設定
+                  </label>
+                  {useSettlementOverride && (
+                    <div className="flex flex-wrap items-center gap-1 text-[11px] text-[var(--text-muted)]">
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        className={`${inputClass} w-12`}
+                        value={settlementTerm.closingDay}
+                        onChange={(e) =>
+                          setSettlementTerm((t) => ({ ...t, closingDay: Number(e.target.value) }))
+                        }
+                      />
+                      日締め
+                      <input
+                        type="number"
+                        min={0}
+                        max={12}
+                        className={`${inputClass} w-12`}
+                        value={settlementTerm.monthsAfter}
+                        onChange={(e) =>
+                          setSettlementTerm((t) => ({ ...t, monthsAfter: Number(e.target.value) }))
+                        }
+                      />
+                      ヶ月後
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        className={`${inputClass} w-12`}
+                        value={settlementTerm.settlementDay}
+                        onChange={(e) =>
+                          setSettlementTerm((t) => ({ ...t, settlementDay: Number(e.target.value) }))
+                        }
+                      />
+                      日
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <CalcMethodBadge

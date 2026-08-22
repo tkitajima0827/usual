@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getClient, getFiscalYears } from "@/lib/queries";
+import { getClient, getFiscalYears, getSettlementSettings } from "@/lib/queries";
+import { SettlementSettingsCard } from "@/components/SettlementSettingsCard";
 
 export default async function ClientPage({
   params,
@@ -12,6 +13,7 @@ export default async function ClientPage({
   if (!client) notFound();
 
   const fiscalYears = await getFiscalYears(clientId);
+  const settlementSettings = await getSettlementSettings(clientId);
 
   return (
     <div className="mx-auto w-full max-w-3xl flex-1 px-6 py-12">
@@ -40,9 +42,10 @@ export default async function ClientPage({
         </ul>
       </div>
 
+      <SettlementSettingsCard data={settlementSettings} />
+
       <div className="mt-8 rounded-xl border border-dashed border-[var(--border-hairline)] px-5 py-4 text-sm text-[var(--text-secondary)]">
-        中期経営計画（5年分のBS/PL/CF連動）、消費税・法人税概算、複数顧客の集計ダッシュボードは
-        次フェーズで実装予定です。
+        中期経営計画（5年分のBS/PL/CF連動）、複数顧客の集計ダッシュボードは次フェーズで実装予定です。
       </div>
     </div>
   );

@@ -280,6 +280,30 @@ async function main() {
     },
   });
 
+  // 回収・支払サイトのデモ用設定。事業者共通の既定は「末締め翌月末」とし、
+  // 売上高科目のみ得意先都合で「20日締め翌々月10日回収」の個別サイトを設定する。
+  await prisma.defaultSettlementTerm.createMany({
+    data: [
+      { clientId: client.id, direction: "RECEIVABLE", closingDay: 31, monthsAfter: 1, settlementDay: 31 },
+      { clientId: client.id, direction: "PAYABLE", closingDay: 31, monthsAfter: 1, settlementDay: 31 },
+    ],
+  });
+  await prisma.account.update({
+    where: { id: salesId },
+    data: { settlementClosingDay: 20, settlementMonthsAfter: 2, settlementDay: 10 },
+  });
+  await prisma.counterparty.create({
+    data: {
+      clientId: client.id,
+      name: "得意先A社（特別条件）",
+      direction: "RECEIVABLE",
+      accountId: salesId,
+      closingDay: 15,
+      monthsAfter: 3,
+      settlementDay: 15,
+    },
+  });
+
   // 税額概算のデモ用設定（bixidの「申告データ登録」相当）。前期(FY2025)の
   // 実績年税額を概算した値を入れ、中間納付額の表示を確認できるようにする。
   await prisma.taxSettings.create({

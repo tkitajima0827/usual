@@ -52,6 +52,11 @@ enum ConsumptionTaxCategory {
   OUT_OF_SCOPE // 不課税・対象外（給与・租税公課・法人税等など）
 }
 
+enum SettlementDirection {
+  RECEIVABLE // 売掛金（回収）
+  PAYABLE // 買掛金（支払）
+}
+
 model Client {
   id                   String              @id @default(cuid())
   name                 String
@@ -64,6 +69,8 @@ model Client {
   accounts       Account[]
   fiscalYears    FiscalYear[]
   monthlyActuals MonthlyActual[]
+  settlementTerms DefaultSettlementTerm[]
+  counterparties  Counterparty[]
 }
 
 model User {
@@ -92,11 +99,55 @@ model Account {
   // 自動推定（src/lib/tax配下）で設定し、必要に応じて手動で上書きする。
   consumptionTaxCategory ConsumptionTaxCategory  @default(TAXABLE)
 
+  // 回収・支払サイトの科目ごとの個別設定（3項目すべて設定されている場合のみ、
+  // 事業者共通の既定サイト(DefaultSettlementTerm)より優先して使う）。
+  settlementClosingDay    Int? // 締め日 (1-31、31は月末扱い)
+  settlementMonthsAfter   Int? // 何ヶ月後に回収/支払するか（翌月=1、翌々月=2 ...）
+  settlementDay           Int? // 回収/支払日 (1-31、31は月末扱い)
+
   monthlyActuals  MonthlyActual[]
   planEntries     PlanEntry[]     @relation("AccountPlanEntry")
   linkedByEntries PlanEntry[]     @relation("LinkedAccount")
+  counterparties  Counterparty[]
 
   @@unique([clientId, code])
+  @@index([clientId])
+}
+
+// 事業者ごとの既定の回収・支払サイト（例:「末締め翌月末」）。
+// 売上高科目（REVENUE）は回収(RECEIVABLE)、売上原価科目（COGS）は支払(PAYABLE)に
+// この既定値を適用する。科目ごとの個別設定があればそちらを優先する。
+model DefaultSettlementTerm {
+  id            String              @id @default(cuid())
+  clientId      String
+  client        Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  direction     SettlementDirection
+  closingDay    Int                 @default(31) // 締め日 (1-31、31は月末扱い)
+  monthsAfter   Int                 @default(1) // 翌月=1、翌々月=2 ...
+  settlementDay Int                 @default(31) // 回収/支払日 (1-31、31は月末扱い)
+  updatedAt     DateTime            @updatedAt
+
+  @@unique([clientId, direction])
+}
+
+// 相手先（得意先・仕入先）マスタ。標準の締め日・回収/支払サイトに当てはまらない
+// 相手先のみ、個別のサイトを登録する運用を想定（bixidの相手先マスタに相当）。
+// 現状のデータモデルには相手先別の取引実績が無いため、月次入出金予定の計算には
+// まだ組み込んでおらず、登録・参照のみ可能（将来、相手先別の実績取込に対応した際に連動させる）。
+model Counterparty {
+  id            String              @id @default(cuid())
+  clientId      String
+  client        Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  accountId     String?
+  account       Account?            @relation(fields: [accountId], references: [id])
+  name          String
+  direction     SettlementDirection
+  closingDay    Int                 @default(31)
+  monthsAfter   Int                 @default(1)
+  settlementDay Int                 @default(31)
+  createdAt     DateTime            @default(now())
+
+  @@unique([clientId, name, direction])
   @@index([clientId])
 }
 
