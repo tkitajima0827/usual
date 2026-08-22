@@ -46,6 +46,12 @@ enum CalcMethod {
   PAST_AVERAGE // 過去平均（該当月の前12ヶ月平均）
 }
 
+enum ConsumptionTaxCategory {
+  TAXABLE // 課税
+  EXEMPT // 非課税
+  OUT_OF_SCOPE // 不課税・対象外（給与・租税公課・法人税等など）
+}
+
 model Client {
   id                   String              @id @default(cuid())
   name                 String
@@ -73,15 +79,18 @@ model User {
 }
 
 model Account {
-  id         String      @id @default(cuid())
-  clientId   String
-  client     Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  code       String
-  name       String
-  statement  Statement   @default(PL)
-  plCategory PLCategory?
-  sortOrder  Int         @default(0)
-  isActive   Boolean     @default(true)
+  id                     String                  @id @default(cuid())
+  clientId               String
+  client                 Client                  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  code                   String
+  name                   String
+  statement              Statement               @default(PL)
+  plCategory             PLCategory?
+  sortOrder              Int                     @default(0)
+  isActive               Boolean                 @default(true)
+  // 消費税の概算計算（本則課税）に使う課税区分。既定値は科目名からの
+  // 自動推定（src/lib/tax配下）で設定し、必要に応じて手動で上書きする。
+  consumptionTaxCategory ConsumptionTaxCategory  @default(TAXABLE)
 
   monthlyActuals  MonthlyActual[]
   planEntries     PlanEntry[]     @relation("AccountPlanEntry")
@@ -114,9 +123,31 @@ model FiscalYear {
   startMonth Int // 期首月 (1-12)
 
   planEntries PlanEntry[]
+  taxSettings TaxSettings?
 
   @@unique([clientId, startYear, startMonth])
   @@index([clientId])
+}
+
+// 消費税・法人税の概算計算に使う設定。前期の申告実績（中間納付額の算出根拠）と
+// 実効税率・繰越欠損金・消費税率を会計年度ごとに保持する（bixidの「申告データ登録」に相当、
+// 概算計算のため個別税目には分解せず単純化している）。
+model TaxSettings {
+  id           String     @id @default(cuid())
+  fiscalYearId String     @unique
+  fiscalYear   FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+
+  effectiveTaxRate Decimal @db.Decimal(5, 2) @default(33.00) // 法人税等の実効税率(%)概算値
+  lossCarryforward Decimal @db.Decimal(14, 2) @default(0) // 当期に控除できる繰越欠損金
+
+  consumptionTaxRate Decimal @db.Decimal(5, 2) @default(10.00) // 消費税率(%)
+
+  // 前期の年間納付額（中間納付額の概算＝前期実績の1/2、に使用）
+  priorYearCorporateTaxAnnual  Decimal? @db.Decimal(14, 2)
+  priorYearConsumptionTaxAnnual Decimal? @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PlanEntry {

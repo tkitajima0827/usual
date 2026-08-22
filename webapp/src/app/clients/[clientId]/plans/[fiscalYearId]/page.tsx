@@ -4,6 +4,7 @@ import { getPlanViewModel } from "@/lib/queries";
 import { StatTile } from "@/components/StatTile";
 import { TrendChart } from "@/components/TrendChart";
 import { PlanTable } from "@/components/PlanTable";
+import { TaxEstimateCard } from "@/components/TaxEstimateCard";
 import { MONTH_LABELS } from "@/lib/format";
 
 export default async function PlanPage({
@@ -54,6 +55,8 @@ export default async function PlanPage({
           <TrendChart points={salesTrend} />
         </div>
       </div>
+
+      <TaxEstimateCard clientId={clientId} fiscalYearId={fiscalYearId} data={data.taxEstimate} />
 
       <div className="mt-6">
         <h2 className="mb-2 text-sm font-medium text-[var(--text-secondary)]">

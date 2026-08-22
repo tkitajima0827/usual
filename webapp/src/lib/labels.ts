@@ -7,6 +7,12 @@ export const CALC_METHOD_LABEL: Record<string, string> = {
   PAST_AVERAGE: "過去平均",
 };
 
+export const CONSUMPTION_TAX_CATEGORY_LABEL: Record<string, string> = {
+  TAXABLE: "課税",
+  EXEMPT: "非課税",
+  OUT_OF_SCOPE: "対象外",
+};
+
 export const PL_CATEGORY_LABEL: Record<string, string> = {
   REVENUE: "売上高",
   COGS: "売上原価",

@@ -2,9 +2,10 @@
 
 import { Fragment, useState, useTransition } from "react";
 import { updatePlanEntry } from "@/lib/actions/planEntry";
-import { CALC_METHOD_LABEL } from "@/lib/labels";
+import { updateConsumptionTaxCategory } from "@/lib/actions/taxSettings";
+import { CALC_METHOD_LABEL, CONSUMPTION_TAX_CATEGORY_LABEL } from "@/lib/labels";
 import { formatYen } from "@/lib/format";
-import type { CalcMethod } from "@/generated/prisma/client";
+import type { CalcMethod, ConsumptionTaxCategory } from "@/generated/prisma/client";
 
 // MFクラウド会計などの外部連携科目は、コードとして人間には読めないURLエンコード
 // された内部IDが入る（安定した突合キーとして採用しているため）。表示上は隠す。
@@ -74,6 +75,7 @@ export interface PlanRowProps {
   priorYearTotal: number | null;
   warnings: string[];
   accountOptions: { id: string; name: string }[];
+  consumptionTaxCategory: string;
 }
 
 export function PlanRow(props: PlanRowProps) {
@@ -85,12 +87,16 @@ export function PlanRow(props: PlanRowProps) {
   const [linkedAccountId, setLinkedAccountId] = useState(props.linkedAccountId ?? "");
   const [linkedPercentage, setLinkedPercentage] = useState(props.linkedPercentage ?? 0);
   const [directValues, setDirectValues] = useState(props.months.map((m) => m.amount));
+  const [consumptionTaxCategory, setConsumptionTaxCategory] = useState(
+    props.consumptionTaxCategory as ConsumptionTaxCategory,
+  );
 
   function startEdit() {
     setCalcMethod(props.calcMethod as CalcMethod);
     setLinkedAccountId(props.linkedAccountId ?? "");
     setLinkedPercentage(props.linkedPercentage ?? 0);
     setDirectValues(props.months.map((m) => m.amount));
+    setConsumptionTaxCategory(props.consumptionTaxCategory as ConsumptionTaxCategory);
     setError(null);
     setEditing(true);
   }
@@ -103,22 +109,33 @@ export function PlanRow(props: PlanRowProps) {
   function save() {
     setError(null);
     startTransition(async () => {
-      const result = await updatePlanEntry({
-        clientId: props.clientId,
-        fiscalYearId: props.fiscalYearId,
-        accountId: props.accountId,
-        calcMethod,
-        linkedAccountId: calcMethod === "LINKED" ? linkedAccountId : null,
-        linkedPercentage: calcMethod === "LINKED" ? linkedPercentage : null,
-        directValues:
-          calcMethod === "DIRECT"
-            ? props.months.map((m, i) => ({ year: m.year, month: m.month, amount: directValues[i] }))
-            : undefined,
-      });
-      if (result.ok) {
+      const results = await Promise.all([
+        updatePlanEntry({
+          clientId: props.clientId,
+          fiscalYearId: props.fiscalYearId,
+          accountId: props.accountId,
+          calcMethod,
+          linkedAccountId: calcMethod === "LINKED" ? linkedAccountId : null,
+          linkedPercentage: calcMethod === "LINKED" ? linkedPercentage : null,
+          directValues:
+            calcMethod === "DIRECT"
+              ? props.months.map((m, i) => ({ year: m.year, month: m.month, amount: directValues[i] }))
+              : undefined,
+        }),
+        consumptionTaxCategory !== props.consumptionTaxCategory
+          ? updateConsumptionTaxCategory({
+              clientId: props.clientId,
+              fiscalYearId: props.fiscalYearId,
+              accountId: props.accountId,
+              consumptionTaxCategory,
+            })
+          : Promise.resolve({ ok: true, error: undefined }),
+      ]);
+      const failed = results.find((r) => !r.ok);
+      if (!failed) {
         setEditing(false);
       } else {
-        setError(result.error ?? "保存に失敗しました");
+        setError(failed.error ?? "保存に失敗しました");
       }
     });
   }
@@ -154,6 +171,9 @@ export function PlanRow(props: PlanRowProps) {
             )}
           </div>
           {isDisplayableCode(props.code) && <div className="text-xs text-[var(--text-muted)]">{props.code}</div>}
+          <div className="text-[11px] text-[var(--text-muted)]">
+            消費税: {CONSUMPTION_TAX_CATEGORY_LABEL[props.consumptionTaxCategory] ?? props.consumptionTaxCategory}
+          </div>
         </td>
         <td className="px-3 py-2">
           {editing ? (
@@ -195,6 +215,20 @@ export function PlanRow(props: PlanRowProps) {
                   <span className="text-xs text-[var(--text-muted)]">%</span>
                 </div>
               )}
+              <label className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
+                消費税区分
+                <select
+                  className={inputClass}
+                  value={consumptionTaxCategory}
+                  onChange={(e) => setConsumptionTaxCategory(e.target.value as ConsumptionTaxCategory)}
+                >
+                  {Object.entries(CONSUMPTION_TAX_CATEGORY_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           ) : (
             <CalcMethodBadge

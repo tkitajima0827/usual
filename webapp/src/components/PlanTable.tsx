@@ -116,6 +116,7 @@ export function PlanTable({ data }: { data: PlanViewModel }) {
                   priorYearTotal={row.priorYearTotal}
                   warnings={row.warnings}
                   accountOptions={accountOptions}
+                  consumptionTaxCategory={row.consumptionTaxCategory}
                 />
               ))}
               {group.category === "COGS" && (
@@ -146,6 +147,26 @@ export function PlanTable({ data }: { data: PlanViewModel }) {
                     total={data.subtotals.ordinaryIncome.total}
                   />
                   <RatioRow label="経常利益率" subtotal={data.subtotals.ordinaryIncome} />
+                </>
+              )}
+              {group.category === "EXTRAORDINARY_LOSS" && (
+                <>
+                  <SubtotalRow
+                    label="税引前当期純利益"
+                    monthTotals={data.subtotals.pretaxIncome.monthTotals}
+                    total={data.subtotals.pretaxIncome.total}
+                  />
+                  <RatioRow label="税引前当期純利益率" subtotal={data.subtotals.pretaxIncome} />
+                </>
+              )}
+              {group.category === "INCOME_TAXES" && (
+                <>
+                  <SubtotalRow
+                    label="当期純利益"
+                    monthTotals={data.subtotals.netIncome.monthTotals}
+                    total={data.subtotals.netIncome.total}
+                  />
+                  <RatioRow label="当期純利益率" subtotal={data.subtotals.netIncome} />
                 </>
               )}
             </Fragment>

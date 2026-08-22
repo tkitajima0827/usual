@@ -6,6 +6,7 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "../src/generated/prisma/client";
+import { classifyConsumptionTax } from "../src/lib/tax/classifyConsumptionTax";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -89,6 +90,8 @@ async function main() {
     plCategory: Prisma.AccountCreateInput["plCategory"];
     sortOrder: number;
     actuals: number[];
+    /** 名称からの自動推定では正しく判定できない科目のみ明示指定する（例: 給与を含む集計科目） */
+    consumptionTaxCategoryOverride?: Prisma.AccountCreateInput["consumptionTaxCategory"];
   };
 
   const accountSeeds: AccountSeed[] = [
@@ -112,6 +115,7 @@ async function main() {
       plCategory: "SGA",
       sortOrder: 30,
       actuals: monthlyActualSeries(2_200_000, { seasonal: seasonalLabor }),
+      consumptionTaxCategoryOverride: "OUT_OF_SCOPE", // 給与・賞与の集計科目のため対象外（自動推定は科目名だけでは判定できない）
     },
     {
       code: "6200",
@@ -162,6 +166,13 @@ async function main() {
       sortOrder: 100,
       actuals: monthlyActualSeries(25_000),
     },
+    {
+      code: "8100",
+      name: "法人税、住民税及び事業税",
+      plCategory: "INCOME_TAXES",
+      sortOrder: 110,
+      actuals: monthlyActualSeries(1_200_000, { seasonal: (m) => (m === 5 ? 1 : 0) }), // 5月に前期分をまとめて計上する想定
+    },
   ];
 
   const accountsByCode: Record<string, { id: string }> = {};
@@ -174,6 +185,7 @@ async function main() {
         statement: "PL",
         plCategory: seed.plCategory,
         sortOrder: seed.sortOrder,
+        consumptionTaxCategory: seed.consumptionTaxCategoryOverride ?? classifyConsumptionTax(seed.name),
       },
     });
     accountsByCode[seed.code] = account;
@@ -239,7 +251,7 @@ async function main() {
     });
   }
 
-  const pastAverageAccounts = ["6400", "6900", "7100"];
+  const pastAverageAccounts = ["6400", "6900", "7100", "8100"];
   for (const code of pastAverageAccounts) {
     await prisma.planEntry.create({
       data: {
@@ -265,6 +277,19 @@ async function main() {
       accountId: accountsByCode["6300"].id,
       calcMethod: "DIRECT",
       directValues: { create: Object.values(adDirectValues) },
+    },
+  });
+
+  // 税額概算のデモ用設定（bixidの「申告データ登録」相当）。前期(FY2025)の
+  // 実績年税額を概算した値を入れ、中間納付額の表示を確認できるようにする。
+  await prisma.taxSettings.create({
+    data: {
+      fiscalYearId: fiscalYear.id,
+      effectiveTaxRate: 33,
+      lossCarryforward: 0,
+      consumptionTaxRate: 10,
+      priorYearCorporateTaxAnnual: 4_500_000,
+      priorYearConsumptionTaxAnnual: 3_800_000,
     },
   });
 

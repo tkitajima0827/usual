@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { addMonths, calculatePlan, ymKey, type PlanEntryInput, type YearMonth } from "@/lib/calc/engine";
 import { PL_CATEGORY_LABEL } from "@/lib/labels";
+import { estimateConsumptionTax, estimateCorporateTax, estimateInterimPayment } from "@/lib/tax/estimate";
 
 export async function getClients() {
   return prisma.client.findMany({ orderBy: { name: "asc" } });
@@ -38,6 +39,8 @@ export interface PlanAccountRow {
   priorYearMonths: (number | null)[];
   priorYearTotal: number | null;
   warnings: string[];
+  /** 消費税の課税区分（課税/非課税/対象外）。概算計算の対象科目の絞り込みに使う */
+  consumptionTaxCategory: string;
 }
 
 export interface PlanCategoryGroup {
@@ -56,6 +59,23 @@ export interface PlanSubtotal {
   margin: number | null;
 }
 
+export interface TaxEstimateViewModel {
+  settings: {
+    effectiveTaxRatePercent: number;
+    lossCarryforward: number;
+    consumptionTaxRatePercent: number;
+    priorYearCorporateTaxAnnual: number | null;
+    priorYearConsumptionTaxAnnual: number | null;
+  };
+  /** 課税売上高・課税仕入高（年間、消費税概算計算の元になる金額） */
+  taxableRevenue: number;
+  taxableExpense: number;
+  corporateTax: { taxableIncome: number; estimatedAnnualTax: number };
+  consumptionTax: { estimatedAnnualTax: number };
+  corporateTaxInterim: number | null;
+  consumptionTaxInterim: number | null;
+}
+
 export interface PlanViewModel {
   client: { id: string; name: string };
   fiscalYear: { id: string; label: string; startYear: number; startMonth: number };
@@ -66,7 +86,10 @@ export interface PlanViewModel {
     grossProfit: PlanSubtotal; // 売上総利益
     operatingIncome: PlanSubtotal; // 営業利益
     ordinaryIncome: PlanSubtotal; // 経常利益
+    pretaxIncome: PlanSubtotal; // 税引前当期純利益
+    netIncome: PlanSubtotal; // 当期純利益
   };
+  taxEstimate: TaxEstimateViewModel;
   errors: string[];
 }
 
@@ -84,6 +107,9 @@ const CATEGORY_ORDER = [
   "SGA",
   "NON_OPERATING_INCOME",
   "NON_OPERATING_EXPENSE",
+  "EXTRAORDINARY_INCOME",
+  "EXTRAORDINARY_LOSS",
+  "INCOME_TAXES",
 ] as const;
 
 function sumArrays(arrays: number[][], length: number): number[] {
@@ -173,6 +199,7 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
           priorYearMonths,
           priorYearTotal: priorYearKnown.length > 0 ? priorYearKnown.reduce((a, b) => a + b, 0) : null,
           warnings: computed.warnings,
+          consumptionTaxCategory: account.consumptionTaxCategory,
         };
       });
     const monthTotals = sumArrays(
@@ -204,6 +231,18 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
     ],
     12,
   );
+  const pretaxIncomeMonths = sumArrays(
+    [
+      ordinaryIncomeMonths,
+      byCategory.EXTRAORDINARY_INCOME.monthTotals,
+      byCategory.EXTRAORDINARY_LOSS.monthTotals.map((v) => -v),
+    ],
+    12,
+  );
+  const netIncomeMonths = sumArrays(
+    [pretaxIncomeMonths, byCategory.INCOME_TAXES.monthTotals.map((v) => -v)],
+    12,
+  );
   const revenueTotal = revenueMonths.reduce((a, b) => a + b, 0);
 
   function buildSubtotal(monthTotals: number[]): PlanSubtotal {
@@ -215,6 +254,39 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
       margin: revenueTotal ? total / revenueTotal : null,
     };
   }
+
+  // 消費税の概算（本則課税）: 課税区分が「課税」の科目のみを対象に、
+  // 課税売上高（REVENUE）と課税仕入高（COGS+SGA）を集計する
+  let taxableRevenue = 0;
+  let taxableExpense = 0;
+  for (const account of accounts) {
+    if (account.consumptionTaxCategory !== "TAXABLE") continue;
+    const computed = resultByAccount.get(account.id);
+    if (!computed) continue;
+    if (account.plCategory === "REVENUE") taxableRevenue += computed.total;
+    else if (account.plCategory === "COGS" || account.plCategory === "SGA") taxableExpense += computed.total;
+  }
+
+  const taxSettings = await prisma.taxSettings.findUnique({ where: { fiscalYearId } });
+  const effectiveTaxRatePercent = taxSettings ? Number(taxSettings.effectiveTaxRate) : 33;
+  const lossCarryforward = taxSettings ? Number(taxSettings.lossCarryforward) : 0;
+  const consumptionTaxRatePercent = taxSettings ? Number(taxSettings.consumptionTaxRate) : 10;
+  const priorYearCorporateTaxAnnual =
+    taxSettings?.priorYearCorporateTaxAnnual != null ? Number(taxSettings.priorYearCorporateTaxAnnual) : null;
+  const priorYearConsumptionTaxAnnual =
+    taxSettings?.priorYearConsumptionTaxAnnual != null ? Number(taxSettings.priorYearConsumptionTaxAnnual) : null;
+
+  const pretaxIncomeTotal = pretaxIncomeMonths.reduce((a, b) => a + b, 0);
+  const corporateTax = estimateCorporateTax({
+    pretaxIncome: pretaxIncomeTotal,
+    effectiveTaxRatePercent,
+    lossCarryforward,
+  });
+  const consumptionTax = estimateConsumptionTax({
+    taxableRevenue,
+    taxableExpense,
+    ratePercent: consumptionTaxRatePercent,
+  });
 
   return {
     client: { id: fiscalYear.client.id, name: fiscalYear.client.name },
@@ -230,6 +302,23 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
       grossProfit: buildSubtotal(grossProfitMonths),
       operatingIncome: buildSubtotal(operatingIncomeMonths),
       ordinaryIncome: buildSubtotal(ordinaryIncomeMonths),
+      pretaxIncome: buildSubtotal(pretaxIncomeMonths),
+      netIncome: buildSubtotal(netIncomeMonths),
+    },
+    taxEstimate: {
+      settings: {
+        effectiveTaxRatePercent,
+        lossCarryforward,
+        consumptionTaxRatePercent,
+        priorYearCorporateTaxAnnual,
+        priorYearConsumptionTaxAnnual,
+      },
+      taxableRevenue,
+      taxableExpense,
+      corporateTax,
+      consumptionTax,
+      corporateTaxInterim: estimateInterimPayment(priorYearCorporateTaxAnnual),
+      consumptionTaxInterim: estimateInterimPayment(priorYearConsumptionTaxAnnual),
     },
     errors: result.errors,
   };

@@ -5,6 +5,7 @@
 // 吸収し、この関数自体はソースを一切知らない。
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { Prisma } from "@/generated/prisma/client";
+import { classifyConsumptionTax } from "@/lib/tax/classifyConsumptionTax";
 
 export interface ActualImportRow {
   /** MF側の勘定科目コード。無い場合は accountName から安定的なコードを生成する */
@@ -69,6 +70,8 @@ export async function importMonthlyActuals(
           statement: row.statement ?? "PL",
           plCategory: row.plCategory,
           sortOrder: nextSortOrder,
+          // 消費税課税区分の初期値は科目名からの推定。必要に応じて画面から手動で上書きする。
+          consumptionTaxCategory: classifyConsumptionTax(row.accountName),
         },
       });
       nextSortOrder += 10;
