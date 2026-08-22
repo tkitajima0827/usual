@@ -57,20 +57,23 @@ SESSION_SECRET="openssl rand -base64 32 等で生成した値"
 3. **環境変数を設定する**（Vercelプロジェクトの Settings → Environment Variables）
    - `DATABASE_URL`: 手順1で控えた接続文字列
    - `SESSION_SECRET`: `openssl rand -base64 32` で生成した値（ローカルの`.env`とは別の値を推奨）
-4. **マイグレーションを適用する**（初回・スキーマ変更時）
-   - ローカルから本番DBに向けて実行: `DATABASE_URL="<本番の接続文字列>" npx prisma migrate deploy`
-   - 自動ビルドには含めていない（プレビュー環境のビルドが誤って本番DBに影響しないようにするため）。
-5. **デプロイ**
+4. **デプロイ**
    - Vercelが自動でビルド・デプロイし、`https://<プロジェクト名>.vercel.app` のようなURLが発行される
      （後から独自ドメインも設定可能）。
-6. **ログインユーザーを作成する**
+   - `package.json`の`build`スクリプトが `prisma migrate deploy && next build` になっており、
+     ビルドのたびに未適用のマイグレーションを自動でデータベースへ反映してから`next build`する
+     （すでに適用済みのマイグレーションは何もしない）。このため、今後スキーマを変更した場合も
+     GitHubにpushしてVercelが再ビルドするだけで反映される。
+   - `postinstall`で`prisma generate`も実行するため、Vercelのビルド時にも生成済みPrismaクライアント
+     （gitignore対象）が正しく作られる。
+5. **ログインユーザーを作成する**
    - シードスクリプトはテスト株式会社向けのデモデータのみを作成するため、実際の顧客・ユーザーは
      `scripts/create-client.ts`（顧客作成）と `scripts/create-user.ts`（ログインユーザー作成、
      `npm run user:create -- --email "..." --name "..." --role FIRM_STAFF --password "..."`）を
-     使って作成する（画面からのユーザー登録UIは今回のスコープ外）。
+     本番DBに対して実行して作成する（画面からのユーザー登録UIは今回のスコープ外）。
 
-`package.json`の`postinstall`で`prisma generate`を実行するようにしているため、Vercelの
-ビルド時にも生成済みPrismaクライアント（gitignore対象）が正しく作られる。
+補足: 開発用サンドボックス環境はネットワーク制限により本番DB（Neon等）へ直接接続できないため、
+マイグレーション適用や本番データ投入はVercelのビルド時、またはユーザー自身の端末から行う。
 
 ## テスト
 
