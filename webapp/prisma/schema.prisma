@@ -1,0 +1,148 @@
+// 予実管理ソフト - データモデル（MVP: 単一顧客の単年度PL計画）
+// 詳しくは README.md の設計メモを参照
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  FIRM_ADMIN // 事務所側 管理者
+  FIRM_STAFF // 事務所側 担当者
+  CLIENT_ADMIN // 顧客側 管理者
+  CLIENT_USER // 顧客側 利用者
+}
+
+enum TaxAccountingMethod {
+  INCLUSIVE // 税込経理
+  EXCLUSIVE // 税抜経理
+}
+
+enum Statement {
+  PL
+  BS
+  CF
+}
+
+enum PLCategory {
+  REVENUE // 売上高
+  COGS // 売上原価
+  SGA // 販売費及び一般管理費
+  NON_OPERATING_INCOME // 営業外収益
+  NON_OPERATING_EXPENSE // 営業外費用
+  EXTRAORDINARY_INCOME // 特別利益
+  EXTRAORDINARY_LOSS // 特別損失
+  INCOME_TAXES // 法人税等
+}
+
+enum CalcMethod {
+  PREV_YEAR_SAME // 前年同額
+  LINKED // 科目連動
+  DIRECT // 直接入力
+  PAST_AVERAGE // 過去平均（該当月の前12ヶ月平均）
+}
+
+model Client {
+  id                   String              @id @default(cuid())
+  name                 String
+  fiscalYearStartMonth Int                 @default(4) // 期首月 (1-12)
+  taxMethod            TaxAccountingMethod @default(EXCLUSIVE)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  users          User[]
+  accounts       Account[]
+  fiscalYears    FiscalYear[]
+  monthlyActuals MonthlyActual[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  role      UserRole
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([clientId])
+}
+
+model Account {
+  id         String      @id @default(cuid())
+  clientId   String
+  client     Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  code       String
+  name       String
+  statement  Statement   @default(PL)
+  plCategory PLCategory?
+  sortOrder  Int         @default(0)
+  isActive   Boolean     @default(true)
+
+  monthlyActuals  MonthlyActual[]
+  planEntries     PlanEntry[]     @relation("AccountPlanEntry")
+  linkedByEntries PlanEntry[]     @relation("LinkedAccount")
+
+  @@unique([clientId, code])
+  @@index([clientId])
+}
+
+model MonthlyActual {
+  id        String  @id @default(cuid())
+  clientId  String
+  client    Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  year      Int
+  month     Int // 1-12 (暦月)
+  amount    Decimal @db.Decimal(14, 2)
+
+  @@unique([accountId, year, month])
+  @@index([clientId, year, month])
+}
+
+model FiscalYear {
+  id         String @id @default(cuid())
+  clientId   String
+  client     Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  label      String // 例: 2026年度
+  startYear  Int
+  startMonth Int // 期首月 (1-12)
+
+  planEntries PlanEntry[]
+
+  @@unique([clientId, startYear, startMonth])
+  @@index([clientId])
+}
+
+model PlanEntry {
+  id               String     @id @default(cuid())
+  fiscalYearId     String
+  fiscalYear       FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  accountId        String
+  account          Account    @relation("AccountPlanEntry", fields: [accountId], references: [id], onDelete: Cascade)
+  calcMethod       CalcMethod
+  linkedAccountId  String?
+  linkedAccount    Account?   @relation("LinkedAccount", fields: [linkedAccountId], references: [id])
+  linkedPercentage Decimal?   @db.Decimal(7, 4) // 例: 60.5000 (%)
+
+  directValues PlanDirectValue[]
+
+  @@unique([fiscalYearId, accountId])
+  @@index([linkedAccountId])
+}
+
+model PlanDirectValue {
+  id          String    @id @default(cuid())
+  planEntryId String
+  planEntry   PlanEntry @relation(fields: [planEntryId], references: [id], onDelete: Cascade)
+  year        Int
+  month       Int // 1-12 (暦月)
+  amount      Decimal   @db.Decimal(14, 2)
+
+  @@unique([planEntryId, year, month])
+}
