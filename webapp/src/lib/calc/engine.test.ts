@@ -149,3 +149,49 @@ describe("calculatePlan", () => {
     expect(result2.accounts[0].months[1].amount).toBeCloseTo(100);
   });
 });
+
+describe("実績優先（isActual）", () => {
+  const fiscalYearStart = { year: 2026, month: 4 };
+
+  it("計画年度内の月でも実績が判明していればそれを優先する（DIRECT）", () => {
+    const actuals = buildActuals([["sales", 2026, 4, 999]]);
+    const directValues: Record<string, number> = {};
+    for (let m = 4; m <= 12; m++) directValues[ymKey(2026, m)] = 500;
+    for (let m = 1; m <= 3; m++) directValues[ymKey(2027, m)] = 500;
+    const result = calculatePlan({
+      fiscalYearStart,
+      planEntries: [{ accountId: "sales", calcMethod: "DIRECT", directValues }],
+      actuals,
+    });
+    const sales = result.accounts[0];
+    expect(sales.months[0]).toMatchObject({ amount: 999, isActual: true }); // 4月は実績が優先される
+    expect(sales.months[1]).toMatchObject({ amount: 500, isActual: false }); // 5月は直接入力値のまま
+    expect(sales.warnings).toHaveLength(0); // 実績で確定するので「未設定」警告は出ない
+  });
+
+  it("実績優先はLINKED・PAST_AVERAGEなど他の計算方式にも同様に適用される", () => {
+    const actuals = buildActuals([["cogs", 2026, 4, 777]]);
+    const result = calculatePlan({
+      fiscalYearStart,
+      planEntries: [
+        { accountId: "sales", calcMethod: "DIRECT", directValues: { [ymKey(2026, 4)]: 1000 } },
+        { accountId: "cogs", calcMethod: "LINKED", linkedAccountId: "sales", linkedPercentage: 50 },
+      ],
+      actuals,
+    });
+    const cogs = result.accounts.find((a) => a.accountId === "cogs")!;
+    expect(cogs.months[0]).toMatchObject({ amount: 777, isActual: true });
+  });
+
+  it("実績確定月の値は、以降の月の過去平均・前年同額の算出にも反映される", () => {
+    // 2026-04(期首月)の実績が110として確定している場合、
+    // 2027-04(翌年度の前年同額)は110を参照するはず
+    const actuals = buildActuals([["rent", 2026, 4, 110]]);
+    const result = calculatePlan({
+      fiscalYearStart: { year: 2027, month: 4 },
+      planEntries: [{ accountId: "rent", calcMethod: "PREV_YEAR_SAME" }],
+      actuals,
+    });
+    expect(result.accounts[0].months[0]).toMatchObject({ amount: 110, isActual: false });
+  });
+});

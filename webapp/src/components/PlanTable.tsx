@@ -1,6 +1,6 @@
 import { Fragment } from "react";
-import type { PlanViewModel } from "@/lib/queries";
-import { formatYen, MONTH_LABELS } from "@/lib/format";
+import type { PlanSubtotal, PlanViewModel } from "@/lib/queries";
+import { formatYen, formatPercent, MONTH_LABELS } from "@/lib/format";
 import { PlanRow } from "@/components/PlanRow";
 
 function AmountCell({ amount, strong = false }: { amount: number; strong?: boolean }) {
@@ -31,6 +31,26 @@ function SubtotalRow({ label, monthTotals, total }: { label: string; monthTotals
   );
 }
 
+// bixidの経営計画画面に倣い、金額の小計（青系）の直下に構成比（黄系）を並べる
+function RatioRow({ label, subtotal }: { label: string; subtotal: PlanSubtotal }) {
+  return (
+    <tr className="bg-[#fdf8e7]">
+      <td className="sticky left-0 z-10 bg-[#fdf8e7] px-3 py-1.5 text-xs text-[var(--text-secondary)]" colSpan={2}>
+        {label}
+      </td>
+      {subtotal.marginByMonth.map((v, i) => (
+        <td key={i} className="whitespace-nowrap px-3 py-1.5 text-right text-xs tabular-nums text-[var(--text-secondary)]">
+          {v === null ? "―" : formatPercent(v)}
+        </td>
+      ))}
+      <td className="whitespace-nowrap px-3 py-1.5 text-right text-xs tabular-nums text-[var(--text-secondary)]">
+        {subtotal.margin === null ? "―" : formatPercent(subtotal.margin)}
+      </td>
+      <td />
+    </tr>
+  );
+}
+
 export function PlanTable({ data }: { data: PlanViewModel }) {
   const accountOptions = data.categories.flatMap((c) => c.rows.map((r) => ({ id: r.accountId, name: r.name })));
 
@@ -45,6 +65,16 @@ export function PlanTable({ data }: { data: PlanViewModel }) {
             <th className="min-w-[140px] px-3 py-2 font-medium">計算方式</th>
             {data.monthLabels.map((m) => (
               <th key={`${m.year}-${m.month}`} className="min-w-[96px] px-3 py-2 text-right font-medium">
+                <span
+                  className="mr-1 inline-block rounded px-1 text-[10px] font-semibold"
+                  style={{
+                    color: m.isActual ? "var(--calc-direct)" : "var(--calc-past-avg)",
+                    backgroundColor: m.isActual ? "color-mix(in srgb, var(--calc-direct) 12%, transparent)" : "color-mix(in srgb, var(--calc-past-avg) 12%, transparent)",
+                  }}
+                  title={m.isActual ? "実績確定済みの月" : "計画（未確定）の月"}
+                >
+                  {m.isActual ? "実" : "予"}
+                </span>
                 {m.year}/{MONTH_LABELS[m.month - 1]}
               </th>
             ))}
@@ -75,32 +105,48 @@ export function PlanTable({ data }: { data: PlanViewModel }) {
                   linkedAccountId={row.linkedAccountId}
                   linkedAccountName={row.linkedAccountName}
                   linkedPercentage={row.linkedPercentage}
-                  months={row.months.map((amount, i) => ({ ...data.monthLabels[i], amount }))}
+                  months={row.months.map((m, i) => ({
+                    year: data.monthLabels[i].year,
+                    month: data.monthLabels[i].month,
+                    amount: m.amount,
+                    isActual: m.isActual,
+                  }))}
                   total={row.total}
+                  priorYearMonths={row.priorYearMonths}
+                  priorYearTotal={row.priorYearTotal}
                   warnings={row.warnings}
                   accountOptions={accountOptions}
                 />
               ))}
               {group.category === "COGS" && (
-                <SubtotalRow
-                  label="売上総利益"
-                  monthTotals={data.subtotals.grossProfit.monthTotals}
-                  total={data.subtotals.grossProfit.total}
-                />
+                <>
+                  <SubtotalRow
+                    label="売上総利益"
+                    monthTotals={data.subtotals.grossProfit.monthTotals}
+                    total={data.subtotals.grossProfit.total}
+                  />
+                  <RatioRow label="売上総利益率" subtotal={data.subtotals.grossProfit} />
+                </>
               )}
               {group.category === "SGA" && (
-                <SubtotalRow
-                  label="営業利益"
-                  monthTotals={data.subtotals.operatingIncome.monthTotals}
-                  total={data.subtotals.operatingIncome.total}
-                />
+                <>
+                  <SubtotalRow
+                    label="営業利益"
+                    monthTotals={data.subtotals.operatingIncome.monthTotals}
+                    total={data.subtotals.operatingIncome.total}
+                  />
+                  <RatioRow label="営業利益率" subtotal={data.subtotals.operatingIncome} />
+                </>
               )}
               {group.category === "NON_OPERATING_EXPENSE" && (
-                <SubtotalRow
-                  label="経常利益"
-                  monthTotals={data.subtotals.ordinaryIncome.monthTotals}
-                  total={data.subtotals.ordinaryIncome.total}
-                />
+                <>
+                  <SubtotalRow
+                    label="経常利益"
+                    monthTotals={data.subtotals.ordinaryIncome.monthTotals}
+                    total={data.subtotals.ordinaryIncome.total}
+                  />
+                  <RatioRow label="経常利益率" subtotal={data.subtotals.ordinaryIncome} />
+                </>
               )}
             </Fragment>
           ))}

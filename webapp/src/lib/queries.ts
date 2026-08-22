@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { calculatePlan, ymKey, type PlanEntryInput } from "@/lib/calc/engine";
+import { addMonths, calculatePlan, ymKey, type PlanEntryInput, type YearMonth } from "@/lib/calc/engine";
 import { PL_CATEGORY_LABEL } from "@/lib/labels";
 
 export async function getClients() {
@@ -17,6 +17,12 @@ export async function getFiscalYears(clientId: string) {
   });
 }
 
+export interface PlanMonthValue {
+  amount: number;
+  /** 実績が判明していて、その値がそのまま採用されている月かどうか */
+  isActual: boolean;
+}
+
 export interface PlanAccountRow {
   accountId: string;
   code: string;
@@ -26,8 +32,11 @@ export interface PlanAccountRow {
   linkedAccountId?: string;
   linkedAccountName?: string;
   linkedPercentage?: number;
-  months: number[]; // 12ヶ月分（期首月始まり）
+  months: PlanMonthValue[]; // 12ヶ月分（期首月始まり）
   total: number;
+  /** 前期（1年前）の同月実績。bixid風の前期/当期比較表示に使う */
+  priorYearMonths: (number | null)[];
+  priorYearTotal: number | null;
   warnings: string[];
 }
 
@@ -39,17 +48,34 @@ export interface PlanCategoryGroup {
   total: number;
 }
 
+export interface PlanSubtotal {
+  monthTotals: number[];
+  total: number;
+  /** 売上高に対する構成比（月次）。売上高が0の月はnull */
+  marginByMonth: (number | null)[];
+  margin: number | null;
+}
+
 export interface PlanViewModel {
   client: { id: string; name: string };
   fiscalYear: { id: string; label: string; startYear: number; startMonth: number };
-  monthLabels: { year: number; month: number }[];
+  /** isActual: 今日時点で既に経過した月（実績が確定しているはずの月）かどうか */
+  monthLabels: { year: number; month: number; isActual: boolean }[];
   categories: PlanCategoryGroup[];
   subtotals: {
-    grossProfit: { monthTotals: number[]; total: number }; // 売上総利益
-    operatingIncome: { monthTotals: number[]; total: number }; // 営業利益
-    ordinaryIncome: { monthTotals: number[]; total: number }; // 経常利益
+    grossProfit: PlanSubtotal; // 売上総利益
+    operatingIncome: PlanSubtotal; // 営業利益
+    ordinaryIncome: PlanSubtotal; // 経常利益
   };
   errors: string[];
+}
+
+function isElapsedMonth(ym: YearMonth, today: YearMonth): boolean {
+  return ym.year * 12 + ym.month < today.year * 12 + today.month;
+}
+
+function marginOf(values: number[], revenue: number[]): (number | null)[] {
+  return values.map((v, i) => (revenue[i] ? v / revenue[i] : null));
 }
 
 const CATEGORY_ORDER = [
@@ -111,12 +137,16 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
   const resultByAccount = new Map(result.accounts.map((a) => [a.accountId, a]));
   const entryByAccount = new Map(planEntries.map((e) => [e.accountId, e]));
 
-  const monthLabels =
+  const rawMonths: YearMonth[] =
     result.accounts[0]?.months.map((m) => ({ year: m.year, month: m.month })) ??
     Array.from({ length: 12 }, (_, i) => {
       const total = fiscalYear.startYear * 12 + (fiscalYear.startMonth - 1) + i;
       return { year: Math.floor(total / 12), month: (total % 12) + 1 };
     });
+
+  const now = new Date();
+  const today: YearMonth = { year: now.getFullYear(), month: now.getMonth() + 1 };
+  const monthLabels = rawMonths.map((ym) => ({ ...ym, isActual: isElapsedMonth(ym, today) }));
 
   const categories: PlanCategoryGroup[] = CATEGORY_ORDER.map((category) => {
     const rows: PlanAccountRow[] = accounts
@@ -124,6 +154,11 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
       .map((account) => {
         const entry = entryByAccount.get(account.id)!;
         const computed = resultByAccount.get(account.id)!;
+        const priorYearMonths = rawMonths.map((ym) => {
+          const prevYm = addMonths(ym, -12);
+          return actuals.get(account.id)?.get(ymKey(prevYm.year, prevYm.month)) ?? null;
+        });
+        const priorYearKnown = priorYearMonths.filter((v): v is number => v !== null);
         return {
           accountId: account.id,
           code: account.code,
@@ -133,13 +168,15 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
           linkedAccountId: entry.linkedAccountId ?? undefined,
           linkedAccountName: entry.linkedAccount?.name,
           linkedPercentage: entry.linkedPercentage ? Number(entry.linkedPercentage) : undefined,
-          months: computed.months.map((m) => m.amount),
+          months: computed.months.map((m) => ({ amount: m.amount, isActual: m.isActual })),
           total: computed.total,
+          priorYearMonths,
+          priorYearTotal: priorYearKnown.length > 0 ? priorYearKnown.reduce((a, b) => a + b, 0) : null,
           warnings: computed.warnings,
         };
       });
     const monthTotals = sumArrays(
-      rows.map((r) => r.months),
+      rows.map((r) => r.months.map((m) => m.amount)),
       12,
     );
     return {
@@ -152,6 +189,7 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
   });
 
   const byCategory = Object.fromEntries(categories.map((c) => [c.category, c]));
+  const revenueMonths = byCategory.REVENUE.monthTotals;
   const grossProfitMonths = sumArrays(
     [byCategory.REVENUE.monthTotals, byCategory.COGS.monthTotals.map((v) => -v)],
     12,
@@ -166,6 +204,17 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
     ],
     12,
   );
+  const revenueTotal = revenueMonths.reduce((a, b) => a + b, 0);
+
+  function buildSubtotal(monthTotals: number[]): PlanSubtotal {
+    const total = monthTotals.reduce((a, b) => a + b, 0);
+    return {
+      monthTotals,
+      total,
+      marginByMonth: marginOf(monthTotals, revenueMonths),
+      margin: revenueTotal ? total / revenueTotal : null,
+    };
+  }
 
   return {
     client: { id: fiscalYear.client.id, name: fiscalYear.client.name },
@@ -178,15 +227,9 @@ export async function getPlanViewModel(fiscalYearId: string): Promise<PlanViewMo
     monthLabels,
     categories,
     subtotals: {
-      grossProfit: { monthTotals: grossProfitMonths, total: grossProfitMonths.reduce((a, b) => a + b, 0) },
-      operatingIncome: {
-        monthTotals: operatingIncomeMonths,
-        total: operatingIncomeMonths.reduce((a, b) => a + b, 0),
-      },
-      ordinaryIncome: {
-        monthTotals: ordinaryIncomeMonths,
-        total: ordinaryIncomeMonths.reduce((a, b) => a + b, 0),
-      },
+      grossProfit: buildSubtotal(grossProfitMonths),
+      operatingIncome: buildSubtotal(operatingIncomeMonths),
+      ordinaryIncome: buildSubtotal(ordinaryIncomeMonths),
     },
     errors: result.errors,
   };

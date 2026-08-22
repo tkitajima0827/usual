@@ -32,6 +32,8 @@ export interface MonthlyPlanValue {
   year: number;
   month: number;
   amount: number;
+  /** true の場合、計算値ではなく実績値（actuals）がそのまま採用されている */
+  isActual: boolean;
 }
 
 export interface AccountPlanResult {
@@ -74,11 +76,13 @@ export function calculatePlan(input: EngineInput): EngineResult {
   const months = fiscalYearMonths(fiscalYearStart);
   const entryByAccount = new Map(planEntries.map((e) => [e.accountId, e]));
 
-  // computed[accountId][ymKey] = amount（計画年度内の確定値）
+  // computed[accountId][ymKey] = amount（計画年度内の確定値。実績が判明していればそれを優先する）
   const computed = new Map<string, Map<string, number>>();
+  const isActual = new Map<string, Set<string>>();
   const warnings = new Map<string, string[]>();
   for (const e of planEntries) {
     computed.set(e.accountId, new Map());
+    isActual.set(e.accountId, new Set());
     warnings.set(e.accountId, []);
   }
 
@@ -126,6 +130,16 @@ export function calculatePlan(input: EngineInput): EngineResult {
     for (const entry of order) {
       const key = ymKey(ym.year, ym.month);
       let amount: number;
+
+      const actualOverride = actuals.get(entry.accountId)?.get(key);
+      if (actualOverride !== undefined) {
+        // 実績が判明している月は、計算方式に関わらず実績値を優先する（予実管理の趣旨）。
+        // これにより、以降の月の前年同額・過去平均・科目連動も実績ベースで計算される。
+        amount = actualOverride;
+        isActual.get(entry.accountId)!.add(key);
+        computed.get(entry.accountId)!.set(key, amount);
+        continue;
+      }
 
       switch (entry.calcMethod) {
         case "DIRECT": {
@@ -188,11 +202,15 @@ export function calculatePlan(input: EngineInput): EngineResult {
   }
 
   const accounts: AccountPlanResult[] = planEntries.map((entry) => {
-    const monthValues = months.map((ym) => ({
-      year: ym.year,
-      month: ym.month,
-      amount: computed.get(entry.accountId)!.get(ymKey(ym.year, ym.month)) ?? 0,
-    }));
+    const monthValues = months.map((ym) => {
+      const key = ymKey(ym.year, ym.month);
+      return {
+        year: ym.year,
+        month: ym.month,
+        amount: computed.get(entry.accountId)!.get(key) ?? 0,
+        isActual: isActual.get(entry.accountId)!.has(key),
+      };
+    });
     return {
       accountId: entry.accountId,
       months: monthValues,
