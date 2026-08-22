@@ -100,6 +100,16 @@ describe("convertMfTransitionPlToActualImportRows", () => {
     expect(dep[11].amount).toBe(3); // 10 + (-7)
   });
 
+  it("importBeforeYearMonth以降（未経過月）はスキップする（0円実績として汚染させない）", () => {
+    // buildReport()の売上高はstart_date=2025-01-01 → 1月分は100, 2月分は20
+    const { rows } = convertMfTransitionPlToActualImportRows(buildReport(), accounts, {
+      importBeforeYearMonth: { year: 2025, month: 2 },
+    });
+    const sales = rows.filter((r) => r.accountName === "売上高");
+    expect(sales).toHaveLength(1);
+    expect(sales[0]).toMatchObject({ year: 2025, month: 1, amount: 100 });
+  });
+
   it("BS科目(financial_statement_type=BALANCE_SHEET)は取り込まない", () => {
     const { rows } = convertMfTransitionPlToActualImportRows(buildReport(), accounts);
     expect(rows.some((r) => r.accountName === "現金")).toBe(false);

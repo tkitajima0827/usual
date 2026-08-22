@@ -6,7 +6,8 @@
 //   npx tsx scripts/import-mf-transition-pl.ts \
 //     --client "ステラリンクスグループ" \
 //     --accounts /path/to/accounts.json \
-//     --report /path/to/pl-2023.json --report /path/to/pl-2024.json ...
+//     --report /path/to/pl-2023.json --report /path/to/pl-2024.json ... \
+//     [--as-of 2026-08]   # 省略時は実行時点の年月（この年月以降は未経過月としてスキップ）
 import "dotenv/config";
 import { readFile } from "node:fs/promises";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -18,24 +19,29 @@ import {
   type MfTransitionPlReport,
 } from "../src/lib/import/mfCloudAdapter";
 
-function parseArgs(argv: string[]): { client?: string; accounts?: string; reports: string[] } {
-  const result: { client?: string; accounts?: string; reports: string[] } = { reports: [] };
+function parseArgs(argv: string[]): { client?: string; accounts?: string; reports: string[]; asOf?: string } {
+  const result: { client?: string; accounts?: string; reports: string[]; asOf?: string } = { reports: [] };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--client") result.client = argv[++i];
     if (argv[i] === "--accounts") result.accounts = argv[++i];
     if (argv[i] === "--report") result.reports.push(argv[++i]);
+    if (argv[i] === "--as-of") result.asOf = argv[++i];
   }
   return result;
 }
 
 async function main() {
-  const { client: clientName, accounts: accountsFile, reports } = parseArgs(process.argv.slice(2));
+  const { client: clientName, accounts: accountsFile, reports, asOf } = parseArgs(process.argv.slice(2));
   if (!clientName || !accountsFile || reports.length === 0) {
     console.error(
-      '使い方: npx tsx scripts/import-mf-transition-pl.ts --client "顧客名" --accounts accounts.json --report pl-2025.json [--report pl-2026.json ...]',
+      '使い方: npx tsx scripts/import-mf-transition-pl.ts --client "顧客名" --accounts accounts.json --report pl-2025.json [--report pl-2026.json ...] [--as-of YYYY-MM]',
     );
     process.exit(1);
   }
+
+  const importBeforeYearMonth = asOf
+    ? { year: Number(asOf.split("-")[0]), month: Number(asOf.split("-")[1]) }
+    : { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
 
   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
   const prisma = new PrismaClient({ adapter });
@@ -51,7 +57,9 @@ async function main() {
 
     for (const reportFile of reports) {
       const report: MfTransitionPlReport = JSON.parse(await readFile(reportFile, "utf-8"));
-      const { rows, warnings } = convertMfTransitionPlToActualImportRows(report, accounts);
+      const { rows, warnings } = convertMfTransitionPlToActualImportRows(report, accounts, {
+        importBeforeYearMonth,
+      });
       const summary = await importMonthlyActuals(prisma, client.id, rows);
 
       console.log(`--- ${reportFile} (fiscal_year=${(report as { fiscal_year?: number }).fiscal_year}) ---`);

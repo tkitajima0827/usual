@@ -2,6 +2,12 @@ import { Fragment } from "react";
 import { CALC_METHOD_LABEL, type PlanViewModel } from "@/lib/queries";
 import { formatYen, MONTH_LABELS } from "@/lib/format";
 
+// MFクラウド会計などの外部連携科目は、コードとして人間には読めないURLエンコード
+// された内部IDが入る（安定した突合キーとして採用しているため）。表示上は隠す。
+function isDisplayableCode(code: string): boolean {
+  return !code.includes("%") && code.length <= 12;
+}
+
 const CALC_METHOD_COLOR: Record<string, string> = {
   PREV_YEAR_SAME: "var(--calc-prev-year)",
   LINKED: "var(--calc-linked)",
@@ -97,7 +103,9 @@ export function PlanTable({ data }: { data: PlanViewModel }) {
                 <tr key={row.accountId} className="border-b border-[var(--gridline)] last:border-b-0">
                   <td className="sticky left-0 z-10 bg-[var(--surface-1)] px-3 py-2">
                     <div className="font-medium">{row.name}</div>
-                    <div className="text-xs text-[var(--text-muted)]">{row.code}</div>
+                    {isDisplayableCode(row.code) && (
+                      <div className="text-xs text-[var(--text-muted)]">{row.code}</div>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <CalcMethodBadge

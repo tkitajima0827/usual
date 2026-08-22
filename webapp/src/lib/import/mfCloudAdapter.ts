@@ -47,6 +47,21 @@ function parseStartYearMonth(startDate: string): YearMonth {
   return { year, month };
 }
 
+function isBefore(a: YearMonth, b: YearMonth): boolean {
+  return a.year * 12 + a.month < b.year * 12 + b.month;
+}
+
+export interface ConvertOptions {
+  /**
+   * この年月より前（＝この年月を含まない）のみ取り込む。年度途中の会計期間を
+   * 取得した場合、MFはまだ発生していない将来月の値を0円で返してくる
+   * （実際にはまだ記帳されていないだけで「実績0円」ではない）。これを
+   * そのまま取り込むと、過去平均・前年同額の算出時にノイズになるため、
+   * 呼び出し側で「今日時点でまだ経過していない月」を渡してスキップする。
+   */
+  importBeforeYearMonth?: YearMonth;
+}
+
 /**
  * 推移表の損益計算書(getReportsTransitionProfitLoss)のレスポンスを
  * ActualImportRow[] に変換する。
@@ -57,10 +72,12 @@ function parseStartYearMonth(startDate: string): YearMonth {
  * - "settlement_balance"（決算整理仕訳）は会計期間の最終月に合算する。
  * - 勘定科目マスタ(getAccounts)に見つからない科目、BS科目、
  *   カテゴリ未対応の科目はスキップまたは分類未設定として警告に積む。
+ * - `importBeforeYearMonth` 以降（未経過月）はスキップし、実績を作らない。
  */
 export function convertMfTransitionPlToActualImportRows(
   report: MfTransitionPlReport,
   accounts: MfAccountSummary[],
+  options: ConvertOptions = {},
 ): { rows: ActualImportRow[]; warnings: string[] } {
   const accountByName = new Map(accounts.map((a) => [a.name, a]));
   const rows: ActualImportRow[] = [];
@@ -86,6 +103,7 @@ export function convertMfTransitionPlToActualImportRows(
       const settlement = settlementIndex >= 0 ? (node.values[settlementIndex] ?? 0) : 0;
       for (let i = 0; i < monthCount; i++) {
         const ym = addMonths(start, i);
+        if (options.importBeforeYearMonth && !isBefore(ym, options.importBeforeYearMonth)) continue;
         const amount = (node.values[i] ?? 0) + (i === monthCount - 1 ? settlement : 0);
         rows.push({
           accountCode: meta.id,
