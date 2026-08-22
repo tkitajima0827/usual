@@ -74,13 +74,14 @@ model Client {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  role      UserRole
-  clientId  String?
-  client    Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  role         UserRole
+  passwordHash String // bcryptハッシュ。ログイン画面からのメール+パスワード認証に使う
+  clientId     String?
+  client       Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
 
   @@index([clientId])
 }

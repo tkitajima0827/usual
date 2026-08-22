@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import type { CalcMethod } from "@/generated/prisma/client";
+import { accountBelongsToClient, fiscalYearBelongsToClient, requireClientAccess } from "@/lib/auth/dal";
 
 export interface UpdatePlanEntryInput {
   clientId: string;
@@ -27,6 +28,14 @@ export interface UpdatePlanEntryResult {
  */
 export async function updatePlanEntry(input: UpdatePlanEntryInput): Promise<UpdatePlanEntryResult> {
   const { clientId, fiscalYearId, accountId, calcMethod } = input;
+
+  await requireClientAccess(clientId);
+  if (!(await fiscalYearBelongsToClient(clientId, fiscalYearId)) || !(await accountBelongsToClient(clientId, accountId))) {
+    return { ok: false, error: "不正なリクエストです" };
+  }
+  if (input.linkedAccountId && !(await accountBelongsToClient(clientId, input.linkedAccountId))) {
+    return { ok: false, error: "不正なリクエストです" };
+  }
 
   if (calcMethod === "LINKED") {
     if (!input.linkedAccountId) {

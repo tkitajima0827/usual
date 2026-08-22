@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import type { ConsumptionTaxCategory } from "@/generated/prisma/client";
+import { accountBelongsToClient, fiscalYearBelongsToClient, requireClientAccess } from "@/lib/auth/dal";
 
 export interface UpdateTaxSettingsInput {
   clientId: string;
@@ -26,6 +27,11 @@ export interface UpdateTaxSettingsResult {
  */
 export async function updateTaxSettings(input: UpdateTaxSettingsInput): Promise<UpdateTaxSettingsResult> {
   const { clientId, fiscalYearId } = input;
+
+  await requireClientAccess(clientId);
+  if (!(await fiscalYearBelongsToClient(clientId, fiscalYearId))) {
+    return { ok: false, error: "不正なリクエストです" };
+  }
 
   if (input.effectiveTaxRatePercent < 0 || input.effectiveTaxRatePercent > 100) {
     return { ok: false, error: "実効税率は0〜100の範囲で入力してください" };
@@ -76,6 +82,11 @@ export interface UpdateConsumptionTaxCategoryInput {
 export async function updateConsumptionTaxCategory(
   input: UpdateConsumptionTaxCategoryInput,
 ): Promise<UpdateTaxSettingsResult> {
+  await requireClientAccess(input.clientId);
+  if (!(await accountBelongsToClient(input.clientId, input.accountId))) {
+    return { ok: false, error: "不正なリクエストです" };
+  }
+
   try {
     await prisma.account.update({
       where: { id: input.accountId },

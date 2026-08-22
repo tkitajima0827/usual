@@ -7,11 +7,14 @@ import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "../src/generated/prisma/client";
 import { classifyConsumptionTax } from "../src/lib/tax/classifyConsumptionTax";
+import { hashPassword } from "../src/lib/auth/password";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 const CLIENT_NAME = "テスト株式会社";
+// デモ用の固定パスワード（本番では絶対に使わないこと。README参照）
+const DEMO_PASSWORD = "stella-demo-2026";
 
 // FY2024: 2024-04 ~ 2025-03, FY2025: 2025-04 ~ 2026-03 の実績を
 // 季節性を持たせて生成する（決算月3月・賞与月6,12月に増える想定）。
@@ -70,6 +73,8 @@ async function main() {
     await prisma.client.delete({ where: { id: existing.id } });
   }
 
+  const demoPasswordHash = await hashPassword(DEMO_PASSWORD);
+
   const client = await prisma.client.create({
     data: {
       name: CLIENT_NAME,
@@ -77,8 +82,18 @@ async function main() {
       taxMethod: "EXCLUSIVE",
       users: {
         create: [
-          { email: "staff@stella-l.com", name: "担当スタッフ", role: "FIRM_STAFF" },
-          { email: "client-admin@test-kk.example.com", name: "テスト株式会社 経理担当", role: "CLIENT_ADMIN" },
+          {
+            email: "staff@stella-l.com",
+            name: "担当スタッフ",
+            role: "FIRM_STAFF",
+            passwordHash: demoPasswordHash,
+          },
+          {
+            email: "client-admin@test-kk.example.com",
+            name: "テスト株式会社 経理担当",
+            role: "CLIENT_ADMIN",
+            passwordHash: demoPasswordHash,
+          },
         ],
       },
     },
@@ -318,6 +333,9 @@ async function main() {
   });
 
   console.log(`Seed完了: client=${client.name} (${client.id}), fiscalYear=${fiscalYear.label} (${fiscalYear.id})`);
+  console.log(`ログイン用テストアカウント（パスワード共通: ${DEMO_PASSWORD}）:`);
+  console.log("  事務所担当者: staff@stella-l.com");
+  console.log("  顧客担当者  : client-admin@test-kk.example.com");
 }
 
 main()

@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import type { SettlementDirection } from "@/generated/prisma/client";
+import {
+  accountBelongsToClient,
+  counterpartyBelongsToClient,
+  fiscalYearBelongsToClient,
+  requireClientAccess,
+} from "@/lib/auth/dal";
 
 export interface ActionResult {
   ok: boolean;
@@ -26,6 +32,7 @@ export interface UpdateDefaultSettlementTermInput {
 
 /** 事業者ごとの既定の回収・支払サイト（例:「末締め翌月末」）を更新する */
 export async function updateDefaultSettlementTerm(input: UpdateDefaultSettlementTermInput): Promise<ActionResult> {
+  await requireClientAccess(input.clientId);
   const error = validateTerm(input.closingDay, input.monthsAfter, input.settlementDay);
   if (error) return { ok: false, error };
 
@@ -65,6 +72,13 @@ export interface UpdateAccountSettlementTermInput {
 
 /** 勘定科目ごとの回収・支払サイトの個別設定（事業者既定サイトへの上書き）を更新する */
 export async function updateAccountSettlementTerm(input: UpdateAccountSettlementTermInput): Promise<ActionResult> {
+  await requireClientAccess(input.clientId);
+  if (
+    !(await fiscalYearBelongsToClient(input.clientId, input.fiscalYearId)) ||
+    !(await accountBelongsToClient(input.clientId, input.accountId))
+  ) {
+    return { ok: false, error: "不正なリクエストです" };
+  }
   if (input.term) {
     const error = validateTerm(input.term.closingDay, input.term.monthsAfter, input.term.settlementDay);
     if (error) return { ok: false, error };
@@ -100,6 +114,10 @@ export interface CounterpartyInput {
 
 /** 標準の回収・支払サイトに当てはまらない相手先の個別サイトを登録する */
 export async function createCounterparty(input: CounterpartyInput): Promise<ActionResult> {
+  await requireClientAccess(input.clientId);
+  if (input.accountId && !(await accountBelongsToClient(input.clientId, input.accountId))) {
+    return { ok: false, error: "不正なリクエストです" };
+  }
   if (!input.name.trim()) return { ok: false, error: "相手先名を入力してください" };
   const error = validateTerm(input.closingDay, input.monthsAfter, input.settlementDay);
   if (error) return { ok: false, error };
@@ -130,6 +148,13 @@ export interface UpdateCounterpartyInput extends CounterpartyInput {
 }
 
 export async function updateCounterparty(input: UpdateCounterpartyInput): Promise<ActionResult> {
+  await requireClientAccess(input.clientId);
+  if (
+    !(await counterpartyBelongsToClient(input.clientId, input.id)) ||
+    (input.accountId && !(await accountBelongsToClient(input.clientId, input.accountId)))
+  ) {
+    return { ok: false, error: "不正なリクエストです" };
+  }
   if (!input.name.trim()) return { ok: false, error: "相手先名を入力してください" };
   const error = validateTerm(input.closingDay, input.monthsAfter, input.settlementDay);
   if (error) return { ok: false, error };
@@ -156,6 +181,11 @@ export async function updateCounterparty(input: UpdateCounterpartyInput): Promis
 }
 
 export async function deleteCounterparty(input: { clientId: string; id: string }): Promise<ActionResult> {
+  await requireClientAccess(input.clientId);
+  if (!(await counterpartyBelongsToClient(input.clientId, input.id))) {
+    return { ok: false, error: "不正なリクエストです" };
+  }
+
   try {
     await prisma.counterparty.delete({ where: { id: input.id } });
   } catch (e) {

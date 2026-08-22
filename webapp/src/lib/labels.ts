@@ -7,6 +7,13 @@ export const CALC_METHOD_LABEL: Record<string, string> = {
   PAST_AVERAGE: "過去平均",
 };
 
+export const USER_ROLE_LABEL: Record<string, string> = {
+  FIRM_ADMIN: "事務所管理者",
+  FIRM_STAFF: "事務所担当者",
+  CLIENT_ADMIN: "顧客管理者",
+  CLIENT_USER: "顧客担当者",
+};
+
 export const CONSUMPTION_TAX_CATEGORY_LABEL: Record<string, string> = {
   TAXABLE: "課税",
   EXEMPT: "非課税",
