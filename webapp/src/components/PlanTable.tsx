@@ -1,47 +1,7 @@
 import { Fragment } from "react";
-import { CALC_METHOD_LABEL, type PlanViewModel } from "@/lib/queries";
+import type { PlanViewModel } from "@/lib/queries";
 import { formatYen, MONTH_LABELS } from "@/lib/format";
-
-// MFクラウド会計などの外部連携科目は、コードとして人間には読めないURLエンコード
-// された内部IDが入る（安定した突合キーとして採用しているため）。表示上は隠す。
-function isDisplayableCode(code: string): boolean {
-  return !code.includes("%") && code.length <= 12;
-}
-
-const CALC_METHOD_COLOR: Record<string, string> = {
-  PREV_YEAR_SAME: "var(--calc-prev-year)",
-  LINKED: "var(--calc-linked)",
-  DIRECT: "var(--calc-direct)",
-  PAST_AVERAGE: "var(--calc-past-avg)",
-};
-
-function CalcMethodBadge({
-  calcMethod,
-  linkedAccountName,
-  linkedPercentage,
-}: {
-  calcMethod: string;
-  linkedAccountName?: string;
-  linkedPercentage?: number;
-}) {
-  const color = CALC_METHOD_COLOR[calcMethod] ?? "var(--text-muted)";
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span
-        className="inline-flex w-fit items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium"
-        style={{ borderColor: color, color }}
-      >
-        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
-        {CALC_METHOD_LABEL[calcMethod] ?? calcMethod}
-      </span>
-      {calcMethod === "LINKED" && linkedAccountName && (
-        <span className="text-[11px] text-[var(--text-muted)]">
-          {linkedAccountName} × {linkedPercentage}%
-        </span>
-      )}
-    </div>
-  );
-}
+import { PlanRow } from "@/components/PlanRow";
 
 function AmountCell({ amount, strong = false }: { amount: number; strong?: boolean }) {
   const negative = amount < 0;
@@ -66,14 +26,17 @@ function SubtotalRow({ label, monthTotals, total }: { label: string; monthTotals
         <AmountCell key={i} amount={v} strong />
       ))}
       <AmountCell amount={total} strong />
+      <td />
     </tr>
   );
 }
 
 export function PlanTable({ data }: { data: PlanViewModel }) {
+  const accountOptions = data.categories.flatMap((c) => c.rows.map((r) => ({ id: r.accountId, name: r.name })));
+
   return (
     <div className="overflow-x-auto rounded-xl border border-[var(--border-hairline)] bg-[var(--surface-1)]">
-      <table className="w-full min-w-[1400px] border-collapse text-sm">
+      <table className="w-full min-w-[1560px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-[var(--border-hairline)] text-left text-[var(--text-secondary)]">
             <th className="sticky left-0 z-10 min-w-[160px] bg-[var(--surface-1)] px-3 py-2 font-medium">
@@ -86,6 +49,7 @@ export function PlanTable({ data }: { data: PlanViewModel }) {
               </th>
             ))}
             <th className="min-w-[110px] px-3 py-2 text-right font-medium">年間合計</th>
+            <th className="min-w-[90px] px-3 py-2 font-medium">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -93,32 +57,29 @@ export function PlanTable({ data }: { data: PlanViewModel }) {
             <Fragment key={group.category}>
               <tr className="bg-[var(--page-plane)]">
                 <td
-                  colSpan={2 + data.monthLabels.length + 1}
+                  colSpan={2 + data.monthLabels.length + 2}
                   className="sticky left-0 px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)]"
                 >
                   {group.label}
                 </td>
               </tr>
               {group.rows.map((row) => (
-                <tr key={row.accountId} className="border-b border-[var(--gridline)] last:border-b-0">
-                  <td className="sticky left-0 z-10 bg-[var(--surface-1)] px-3 py-2">
-                    <div className="font-medium">{row.name}</div>
-                    {isDisplayableCode(row.code) && (
-                      <div className="text-xs text-[var(--text-muted)]">{row.code}</div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <CalcMethodBadge
-                      calcMethod={row.calcMethod}
-                      linkedAccountName={row.linkedAccountName}
-                      linkedPercentage={row.linkedPercentage}
-                    />
-                  </td>
-                  {row.months.map((amount, i) => (
-                    <AmountCell key={i} amount={amount} />
-                  ))}
-                  <AmountCell amount={row.total} strong />
-                </tr>
+                <PlanRow
+                  key={row.accountId}
+                  clientId={data.client.id}
+                  fiscalYearId={data.fiscalYear.id}
+                  accountId={row.accountId}
+                  code={row.code}
+                  name={row.name}
+                  calcMethod={row.calcMethod}
+                  linkedAccountId={row.linkedAccountId}
+                  linkedAccountName={row.linkedAccountName}
+                  linkedPercentage={row.linkedPercentage}
+                  months={row.months.map((amount, i) => ({ ...data.monthLabels[i], amount }))}
+                  total={row.total}
+                  warnings={row.warnings}
+                  accountOptions={accountOptions}
+                />
               ))}
               {group.category === "COGS" && (
                 <SubtotalRow
