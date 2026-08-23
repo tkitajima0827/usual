@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { MissingApiKeyError } from "@/lib/ai/errors";
 
-export class MissingApiKeyError extends Error {}
+export { MissingApiKeyError };
 
 export interface ParsedHoldingRow {
   code: string;

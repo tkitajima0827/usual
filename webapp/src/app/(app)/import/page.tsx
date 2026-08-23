@@ -1,6 +1,7 @@
 import { requireCurrentBusiness } from "@/lib/business-context";
 import prisma from "@/lib/prisma";
 import ImportForm from "./import-form";
+import DeleteBatchButton from "./delete-batch-button";
 
 export default async function ImportPage() {
   const { business } = await requireCurrentBusiness();
@@ -12,6 +13,7 @@ export default async function ImportPage() {
 
   const recentBatches = await prisma.importBatch.findMany({
     where: { businessId: business.id },
+    include: { fiscalPeriod: true },
     orderBy: { createdAt: "desc" },
     take: 10,
   });
@@ -41,23 +43,29 @@ export default async function ImportPage() {
             <thead className="bg-slate-50 text-left text-slate-500">
               <tr>
                 <th className="px-4 py-2">取込日時</th>
+                <th className="px-4 py-2">会計期間</th>
                 <th className="px-4 py-2">対象月</th>
                 <th className="px-4 py-2">ファイル名</th>
                 <th className="px-4 py-2">件数</th>
+                <th className="px-4 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {recentBatches.map((b) => (
                 <tr key={b.id} className="border-t border-slate-100">
                   <td className="px-4 py-2">{b.createdAt.toLocaleString("ja-JP")}</td>
+                  <td className="px-4 py-2">{b.fiscalPeriod.label}</td>
                   <td className="px-4 py-2">{b.month}</td>
                   <td className="px-4 py-2">{b.fileName}</td>
                   <td className="px-4 py-2">{b.rowCount}</td>
+                  <td className="px-4 py-2">
+                    <DeleteBatchButton id={b.id} fileName={b.fileName} />
+                  </td>
                 </tr>
               ))}
               {recentBatches.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
                     取込履歴はありません。
                   </td>
                 </tr>

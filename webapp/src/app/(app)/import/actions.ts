@@ -115,3 +115,29 @@ export async function importTradeHistoryAction(
     warnings: [...warnings.map((w) => w.message), ...summary.warnings],
   };
 }
+
+/**
+ * 取込バッチを削除する。バッチに紐づく取引(Trade)も合わせて削除し、対象の会計期間を
+ * 再計算する。ImportBatch側のonDelete:SetNullだけに任せると取引が残ってしまい
+ * 原価・実現損益が誤って残ってしまうため、明示的にTradeも削除する。
+ */
+export async function deleteImportBatchAction(batchId: string) {
+  const { business } = await requireCurrentBusiness();
+
+  const batch = await prisma.importBatch.findFirst({
+    where: { id: batchId, businessId: business.id },
+  });
+  if (!batch) return;
+
+  await prisma.$transaction([
+    prisma.trade.deleteMany({ where: { importBatchId: batch.id } }),
+    prisma.importBatch.delete({ where: { id: batch.id } }),
+  ]);
+
+  await recomputeFiscalPeriod(business.id, batch.fiscalPeriodId);
+
+  revalidatePath("/import");
+  revalidatePath("/dashboard");
+  revalidatePath("/holdings");
+  revalidatePath("/journal");
+}
