@@ -33,6 +33,10 @@ export default function OcrUploadForm({
   const [saveState, saveAction, saving] = useActionState(bulkSaveOpeningBalanceAction, initialSaveState);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [fiscalPeriodId, setFiscalPeriodId] = useState(fiscalPeriods[0]?.id ?? "");
+  // 読み取り実行時に実際に選ばれていた会計期間(サーバーからのエコーバック値)。保存は
+  // 必ずこの値を使う。読み取り後にセレクトの表示が別の期間に戻って見えることがあっても、
+  // 保存先はアップロード時点で選んだ期間のまま変わらない。
+  const [confirmedFiscalPeriodId, setConfirmedFiscalPeriodId] = useState<string | null>(null);
 
   // useActionStateの結果が変わったタイミングでrowsを同期する(レンダー中に更新することで
   // useEffectを使わずに済ませ、余分な再レンダーを避けている。React公式ドキュメント
@@ -42,14 +46,18 @@ export default function OcrUploadForm({
     setLastParseState(parseState);
     if (parseState.status === "success" && parseState.rows) {
       setRows(parseState.rows);
+      setConfirmedFiscalPeriodId(parseState.fiscalPeriodId ?? null);
     }
   }
+
+  const confirmedFiscalPeriodLabel = fiscalPeriods.find((fp) => fp.id === confirmedFiscalPeriodId)?.label;
 
   const [lastSaveState, setLastSaveState] = useState(saveState);
   if (saveState !== lastSaveState) {
     setLastSaveState(saveState);
     if (saveState.status === "success") {
       setRows(null);
+      setConfirmedFiscalPeriodId(null);
     }
   }
 
@@ -114,11 +122,14 @@ export default function OcrUploadForm({
 
       {parseState.status === "error" ? <p className="text-sm text-red-600">{parseState.message}</p> : null}
 
-      {rows && rows.length > 0 ? (
+      {rows && rows.length > 0 && confirmedFiscalPeriodId ? (
         <form action={saveAction} className="flex flex-col gap-3">
-          <input type="hidden" name="fiscalPeriodId" value={fiscalPeriodId} />
+          <input type="hidden" name="fiscalPeriodId" value={confirmedFiscalPeriodId} />
           <input type="hidden" name="rows" value={JSON.stringify(rows)} />
-          <p className="text-sm text-slate-600">読み取り結果です。内容を確認・修正してから保存してください。</p>
+          <p className="text-sm text-slate-600">
+            読み取り結果です。内容を確認・修正してから保存してください。保存先:{" "}
+            <span className="font-semibold text-slate-900">{confirmedFiscalPeriodLabel ?? "(不明な会計期間)"}</span>
+          </p>
           <div className="overflow-x-auto rounded-md border border-slate-200">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left text-slate-500">

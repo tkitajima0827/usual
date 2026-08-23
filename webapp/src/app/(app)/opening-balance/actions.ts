@@ -162,20 +162,37 @@ export interface ParseActionState {
   status: "idle" | "success" | "error";
   message?: string;
   rows?: ParsedHoldingRow[];
+  fiscalPeriodId?: string;
 }
 
 export async function parseBalanceCertificateAction(
   _prev: ParseActionState,
   formData: FormData,
 ): Promise<ParseActionState> {
-  await requireCurrentBusiness();
+  const { business } = await requireCurrentBusiness();
+
+  // アップロード時点で選ばれていた会計期間IDをそのまま結果に含めて返す。保存フォームは
+  // 画面上のセレクトの「今の値」ではなく、この値を保存先として使う。読み取り後にセレクトの
+  // 表示が別の期間に戻って見えることがあっても、実際の保存先は読み取り時に選んだ期間のまま
+  // 変わらないようにするため。
+  const fiscalPeriodId = String(formData.get("fiscalPeriodId") ?? "");
+  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({
+    where: { id: fiscalPeriodId, businessId: business.id },
+  });
+  if (!fiscalPeriod) {
+    return { status: "error", message: "会計期間を選択してください。" };
+  }
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
-    return { status: "error", message: "ファイルを選択してください。" };
+    return { status: "error", message: "ファイルを選択してください。", fiscalPeriodId };
   }
   if (file.size > 15 * 1024 * 1024) {
-    return { status: "error", message: "ファイルサイズが大きすぎます（15MB以下にしてください）。" };
+    return {
+      status: "error",
+      message: "ファイルサイズが大きすぎます（15MB以下にしてください）。",
+      fiscalPeriodId,
+    };
   }
 
   try {
@@ -185,20 +202,23 @@ export async function parseBalanceCertificateAction(
       return {
         status: "error",
         message: "銘柄を読み取れませんでした。画像が鮮明か確認するか、手入力してください。",
+        fiscalPeriodId,
       };
     }
-    return { status: "success", rows };
+    return { status: "success", rows, fiscalPeriodId };
   } catch (error) {
     console.error(error);
     if (error instanceof MissingApiKeyError) {
       return {
         status: "error",
         message: "AI読み取り機能が設定されていません（管理者にANTHROPIC_API_KEYの設定を確認してください）。",
+        fiscalPeriodId,
       };
     }
     return {
       status: "error",
       message: "読み取りに失敗しました。もう一度お試しいただくか、手入力してください。",
+      fiscalPeriodId,
     };
   }
 }
