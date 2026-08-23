@@ -1,0 +1,13 @@
+[
+  { "accountCode": "4000", "accountName": "売上高", "year": 2026, "month": 4, "amount": 11250000 },
+  {
+    "accountCode": "6600",
+    "accountName": "旅費交通費",
+    "statement": "PL",
+    "plCategory": "SGA",
+    "year": 2026,
+    "month": 4,
+    "amount": 45000
+  },
+  { "accountName": "雑収入", "year": 2026, "month": 4, "amount": 3000 }
+]

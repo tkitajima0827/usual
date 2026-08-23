@@ -1,0 +1,43 @@
+{
+  "name": "webapp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma migrate deploy && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest run",
+    "postinstall": "prisma generate",
+    "db:seed": "tsx prisma/seed.ts",
+    "import:actuals": "tsx scripts/import-actuals.ts",
+    "import:mf-transition-pl": "tsx scripts/import-mf-transition-pl.ts",
+    "client:create": "tsx scripts/create-client.ts",
+    "user:create": "tsx scripts/create-user.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.10",
+    "next": "16.3.2",
+    "pg": "^8.23.0",
+    "prisma": "^7.9.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20.19.43",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.2",
+    "playwright": "^1.62.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.12",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
+  }
+}
