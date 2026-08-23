@@ -56,7 +56,8 @@ export default function ValuationForm({
           {fetching ? "取得中..." : "ネットから月末終値を自動取得"}
         </button>
         <p className="text-xs text-slate-500">
-          AIがWeb検索で各銘柄の月末終値を調べて下の欄に自動入力します。取得後は必ず内容を確認・修正してから保存してください。
+          AIが日本取引所グループ(JPX)の「月間相場表」PDFから各銘柄の月末終値を調べて下の欄に自動入力します。
+          取得後は必ず内容を確認・修正してから保存してください。
         </p>
         {fetchState.status === "error" ? <p className="w-full text-sm text-red-600">{fetchState.message}</p> : null}
         {fetchState.status === "success" ? (
