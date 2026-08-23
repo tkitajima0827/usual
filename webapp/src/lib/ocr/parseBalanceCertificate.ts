@@ -102,7 +102,7 @@ export async function parseBalanceCertificate(
     model: "claude-opus-5",
     max_tokens: 8192,
     thinking: { type: "adaptive" },
-    output_config: { effort: "medium" },
+    output_config: { effort: "high" },
     tools: [EXTRACT_TOOL, { type: "web_search_20260209", name: "web_search", max_uses: 30 }],
     messages: [
       {
@@ -113,6 +113,8 @@ export async function parseBalanceCertificate(
             type: "text",
             text:
               "これは証券会社が発行した残高証明書です。記載されている銘柄ごとに、現物・信用買建・信用売建の株数と取得価額(円)を読み取ってください。" +
+              "証明書は表形式になっているはずです。1行ずつ、銘柄名とその行の各数値(株数・取得価額)が正しく対応しているか必ず確認し、" +
+              "前後の行の数値を取り違えたり列がずれたりしないよう注意してください。" +
               "銘柄コードが証明書に記載されていない場合は、上場企業であればweb_searchで「会社名 証券コード」のように検索して4桁の証券コードを特定し埋めてください" +
               "(Yahoo!ファイナンスや日本取引所グループ、会社四季報など信頼できる情報源を優先してください)。非上場企業やコードが特定できない銘柄は空文字のままで構いません。" +
               "必要な調査が終わったら、最後に必ずreport_holdingsツールを1回だけ呼び出し、全銘柄分をまとめて報告してください。金額はカンマを除いた数値にし、該当する保有がない区分は0にしてください。",
