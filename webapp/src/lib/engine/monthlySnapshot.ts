@@ -4,7 +4,10 @@ export interface MonthlyTotal {
   month: string;
   bookValue: number;
   marketValue: number | null;
-  realizedGainCumulative: number;
+  monthlyValuationGain: number | null;
+  cumulativeValuationGain: number | null;
+  monthlyRealizedGain: number;
+  cumulativeRealizedGain: number;
 }
 
 function monthRange(start: Date, end: Date): string[] {
@@ -20,7 +23,14 @@ function monthRange(start: Date, end: Date): string[] {
 
 /**
  * 会計期間内の各月について、現物保有の帳簿価額合計・評価額合計(入力済みの場合)・
- * 期首からの累積実現損益を算出する。ダッシュボードの推移グラフ用。
+ * 評価損益(単月/累計)・売買(実現)損益(単月/累計)を算出する。ダッシュボードの推移
+ * グラフ用。
+ *
+ * 評価損益は月末時価評価が「取得価額との差額」という時点のスナップショットとして
+ * 保存されているため、その値自体を累計評価損益として扱い、前回の評価入力月からの
+ * 差分を単月評価損益とする(未入力の月はnull、前回入力月からの純粋な変動を表す)。
+ * 一方、売買損益は取引が発生した月ごとに実現するフローなので、その月に発生した分を
+ * 単月売買損益、期首からの合計を累計売買損益とする。
  */
 export async function getMonthlyTotals(
   businessId: string,
@@ -55,6 +65,7 @@ export async function getMonthlyTotals(
 
   const results: MonthlyTotal[] = [];
   let cumulativeRealizedGain = 0;
+  let previousCumulativeValuationGain = 0;
   let spotCursor = 0;
   let gainCursor = 0;
   // securityId -> latest known bookValue as of the current iteration point
@@ -78,21 +89,35 @@ export async function getMonthlyTotals(
       spotCursor++;
     }
 
+    let monthlyRealizedGain = 0;
     while (
       gainCursor < allLedgerEntries.length &&
       allLedgerEntries[gainCursor].trade.tradeDate.getTime() <= monthEnd.getTime()
     ) {
-      cumulativeRealizedGain += allLedgerEntries[gainCursor].realizedGain ?? 0;
+      monthlyRealizedGain += allLedgerEntries[gainCursor].realizedGain ?? 0;
       gainCursor++;
     }
+    cumulativeRealizedGain += monthlyRealizedGain;
 
     const bookValue = [...bookValueBySecurity.values()].reduce((sum, v) => sum + v, 0);
+    const marketValue = valuationByMonth.get(month) ?? null;
+
+    let monthlyValuationGain: number | null = null;
+    let cumulativeValuationGain: number | null = null;
+    if (marketValue !== null) {
+      cumulativeValuationGain = marketValue - bookValue;
+      monthlyValuationGain = cumulativeValuationGain - previousCumulativeValuationGain;
+      previousCumulativeValuationGain = cumulativeValuationGain;
+    }
 
     results.push({
       month,
       bookValue,
-      marketValue: valuationByMonth.get(month) ?? null,
-      realizedGainCumulative: Math.round(cumulativeRealizedGain),
+      marketValue,
+      monthlyValuationGain: monthlyValuationGain !== null ? Math.round(monthlyValuationGain) : null,
+      cumulativeValuationGain: cumulativeValuationGain !== null ? Math.round(cumulativeValuationGain) : null,
+      monthlyRealizedGain: Math.round(monthlyRealizedGain),
+      cumulativeRealizedGain: Math.round(cumulativeRealizedGain),
     });
   }
 

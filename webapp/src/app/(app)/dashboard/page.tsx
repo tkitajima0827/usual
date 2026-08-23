@@ -90,9 +90,9 @@ export default async function DashboardPage(props: PageProps<"/dashboard">) {
           </p>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <p className="text-xs text-slate-500">期首からの累積実現損益</p>
+          <p className="text-xs text-slate-500">期首からの累計売買損益</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {(monthlyTotals.find((t) => t.month === month)?.realizedGainCumulative ?? 0).toLocaleString()}
+            {(monthlyTotals.find((t) => t.month === month)?.cumulativeRealizedGain ?? 0).toLocaleString()}
           </p>
         </div>
       </div>
