@@ -2,20 +2,28 @@ import { requireCurrentBusiness } from "@/lib/business-context";
 import prisma from "@/lib/prisma";
 import ImportForm from "./import-form";
 import DeleteBatchButton from "./delete-batch-button";
+import RecomputeForm from "./recompute-form";
+import HistoryLimitSelect from "./history-limit-select";
 
-export default async function ImportPage() {
+const LIMIT_OPTIONS = ["10", "20", "50", "all"] as const;
+
+export default async function ImportPage(props: PageProps<"/import">) {
   const { business } = await requireCurrentBusiness();
+  const searchParams = await props.searchParams;
 
   const fiscalPeriods = await prisma.fiscalPeriod.findMany({
     where: { businessId: business.id },
     orderBy: { startDate: "desc" },
   });
 
+  const limitParam = typeof searchParams.limit === "string" ? searchParams.limit : "10";
+  const limit = LIMIT_OPTIONS.includes(limitParam as (typeof LIMIT_OPTIONS)[number]) ? limitParam : "10";
+
   const recentBatches = await prisma.importBatch.findMany({
     where: { businessId: business.id },
     include: { fiscalPeriod: true },
     orderBy: { createdAt: "desc" },
-    take: 10,
+    ...(limit === "all" ? {} : { take: Number(limit) }),
   });
 
   return (
@@ -33,11 +41,17 @@ export default async function ImportPage() {
           会計期間が登録されていません。先に管理画面で会計期間を作成してください。
         </p>
       ) : (
-        <ImportForm fiscalPeriods={fiscalPeriods.map((fp) => ({ id: fp.id, label: fp.label }))} />
+        <>
+          <ImportForm fiscalPeriods={fiscalPeriods.map((fp) => ({ id: fp.id, label: fp.label }))} />
+          <RecomputeForm fiscalPeriods={fiscalPeriods.map((fp) => ({ id: fp.id, label: fp.label }))} />
+        </>
       )}
 
       <div>
-        <h2 className="mb-2 text-sm font-semibold text-slate-700">取込履歴</h2>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-700">取込履歴</h2>
+          <HistoryLimitSelect value={limit} />
+        </div>
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-500">

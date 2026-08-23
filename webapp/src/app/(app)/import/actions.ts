@@ -116,6 +116,45 @@ export async function importTradeHistoryAction(
   };
 }
 
+export interface RecomputeActionState {
+  status: "idle" | "success" | "error";
+  message?: string;
+  warnings?: string[];
+}
+
+/**
+ * 指定した会計期間の原価台帳・実現損益・取引起因の仕訳を、現在登録されている
+ * 取引・期首残高から再計算する。取込順の入れ替えや期首残高の修正など、
+ * データを直接編集した後に整合性を取り直すための手動トリガー。
+ */
+export async function recomputeFiscalPeriodAction(
+  _prev: RecomputeActionState,
+  formData: FormData,
+): Promise<RecomputeActionState> {
+  const { business } = await requireCurrentBusiness();
+
+  const fiscalPeriodId = String(formData.get("fiscalPeriodId") ?? "");
+  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({
+    where: { id: fiscalPeriodId, businessId: business.id },
+  });
+  if (!fiscalPeriod) {
+    return { status: "error", message: "会計期間が見つかりません。" };
+  }
+
+  const summary = await recomputeFiscalPeriod(business.id, fiscalPeriodId);
+
+  revalidatePath("/import");
+  revalidatePath("/dashboard");
+  revalidatePath("/holdings");
+  revalidatePath("/journal");
+
+  return {
+    status: "success",
+    message: `${fiscalPeriod.label}を再計算しました(取引${summary.tradeCount}件・仕訳${summary.journalLineCount}件)。`,
+    warnings: summary.warnings,
+  };
+}
+
 /**
  * 取込バッチを削除する。バッチに紐づく取引(Trade)も合わせて削除し、対象の会計期間を
  * 再計算する。ImportBatch側のonDelete:SetNullだけに任せると取引が残ってしまい
