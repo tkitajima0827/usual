@@ -79,7 +79,35 @@ export function processSecurityTrades(
   const steps: LedgerStep[] = [];
   const warnings: string[] = [];
 
-  const sorted = [...trades].sort((a, b) => a.tradeDate.getTime() - b.tradeDate.getTime());
+  // SBI証券の「約定履歴照会」には約定時刻が含まれておらず、同一日内の複数取引は
+  // 取引種別ごとにまとめられた順(新規建てより先に決済が並ぶ場合がある)で出力される
+  // ことがある。取引所ルール上、保有していない分を決済することはできないため、
+  // 同日内では常に「新規建て・買付」→「現引/現渡」→「決済」の順に並べ替えて処理する。
+  // これを行わないと、同日中に新規建てした分を決済しただけの取引が「残数量を超える
+  // 決済」として警告付きでクランプされ、取得原価が引き去られずに決済代金の全額が
+  // 実現損益として計上されてしまう(売却額がそのまま損益に見える不具合の原因)。
+  const sameDayRank = (transactionType: TransactionType): number => {
+    switch (transactionType) {
+      case TransactionType.SPOT_BUY:
+      case TransactionType.MARGIN_OPEN_BUY:
+      case TransactionType.MARGIN_OPEN_SELL:
+        return 0;
+      case TransactionType.ASSIGN_BUY:
+      case TransactionType.ASSIGN_SELL:
+        return 1;
+      case TransactionType.SPOT_SELL:
+      case TransactionType.MARGIN_CLOSE_SELL:
+      case TransactionType.MARGIN_CLOSE_BUY:
+        return 2;
+      default:
+        return 1;
+    }
+  };
+  const sorted = [...trades].sort((a, b) => {
+    const dateDiff = a.tradeDate.getTime() - b.tradeDate.getTime();
+    if (dateDiff !== 0) return dateDiff;
+    return sameDayRank(a.transactionType) - sameDayRank(b.transactionType);
+  });
 
   const pushStep = (
     tradeId: string,
