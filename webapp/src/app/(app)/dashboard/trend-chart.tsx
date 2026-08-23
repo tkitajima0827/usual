@@ -23,8 +23,11 @@ export interface TrendPoint {
   cumulativeRealizedGain: number;
 }
 
-const numberFormatter = (v: number) => v.toLocaleString();
-const tooltipFormatter = (v: unknown) => (v === undefined || v === null ? "-" : Number(v).toLocaleString());
+// このコンポーネントはクライアント側で実行されるため、toLocaleString()に
+// ロケールを渡さないと閲覧者のブラウザ設定(例: 3桁区切りではないロケール)に
+// 依存してしまう。常に日本式の3桁区切りで表示するため"ja-JP"を明示する。
+const numberFormatter = (v: number) => v.toLocaleString("ja-JP");
+const tooltipFormatter = (v: unknown) => (v === undefined || v === null ? "-" : Number(v).toLocaleString("ja-JP"));
 
 export default function TrendChart({ data }: { data: TrendPoint[] }) {
   return (
