@@ -34,7 +34,9 @@ export async function recomputeFiscalPeriod(
     prisma.trade.findMany({
       where: { businessId, fiscalPeriodId },
       include: { security: true },
-      orderBy: { tradeDate: "asc" },
+      // 同日の取引は元データの並び順(=登録順)で処理する必要があるため、
+      // tradeDateだけでなくcreatedAtも第2キーとして必ず指定する。
+      orderBy: [{ tradeDate: "asc" }, { createdAt: "asc" }],
     }),
   ]);
 

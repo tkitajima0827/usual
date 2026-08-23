@@ -19,6 +19,7 @@
  *   その単価を建値の近似値として採用する（実現損益は参考値）。
  * - 月末単価は「有価証券評価損益計算」シートに記載の2026/2/27時点の実際の単価。
  */
+import "dotenv/config";
 import fs from "fs";
 import path from "path";
 import prisma from "../src/lib/prisma";
