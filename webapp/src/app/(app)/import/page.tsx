@@ -26,6 +26,16 @@ export default async function ImportPage(props: PageProps<"/import">) {
     ...(limit === "all" ? {} : { take: Number(limit) }),
   });
 
+  // 同じ会計期間・同じ対象月の取込が複数あると、多くの場合は重複取込(または
+  // 取込のやり直し忘れ)なので、目立つように印を付ける。
+  const duplicateKeyCounts = new Map<string, number>();
+  for (const b of recentBatches) {
+    const key = `${b.fiscalPeriodId}:${b.month}`;
+    duplicateKeyCounts.set(key, (duplicateKeyCounts.get(key) ?? 0) + 1);
+  }
+  const isLikelyDuplicate = (b: (typeof recentBatches)[number]) =>
+    (duplicateKeyCounts.get(`${b.fiscalPeriodId}:${b.month}`) ?? 0) > 1;
+
   return (
     <div className="flex flex-col gap-8">
       <div>
@@ -52,6 +62,10 @@ export default async function ImportPage(props: PageProps<"/import">) {
           <h2 className="text-sm font-semibold text-slate-700">取込履歴</h2>
           <HistoryLimitSelect value={limit} />
         </div>
+        <p className="mb-2 text-xs text-slate-500">
+          同じ会計期間・同じ対象月の取込が複数ある行には「重複の可能性」と表示されます。誤って同じ月を
+          2回取り込んでいないか確認し、不要な方を削除してください。
+        </p>
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-500">
@@ -66,9 +80,19 @@ export default async function ImportPage(props: PageProps<"/import">) {
             </thead>
             <tbody>
               {recentBatches.map((b) => (
-                <tr key={b.id} className="border-t border-slate-100">
+                <tr
+                  key={b.id}
+                  className={`border-t border-slate-100 ${isLikelyDuplicate(b) ? "bg-amber-50" : ""}`}
+                >
                   <td className="px-4 py-2">{b.createdAt.toLocaleString("ja-JP")}</td>
-                  <td className="px-4 py-2">{b.fiscalPeriod.label}</td>
+                  <td className="px-4 py-2">
+                    {b.fiscalPeriod.label}
+                    {isLikelyDuplicate(b) ? (
+                      <span className="ml-2 rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">
+                        重複の可能性
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-2">{b.month}</td>
                   <td className="px-4 py-2">{b.fileName}</td>
                   <td className="px-4 py-2">{b.rowCount}</td>
