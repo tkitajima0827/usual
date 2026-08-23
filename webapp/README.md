@@ -100,7 +100,7 @@ npm run dev
    | `AUTH_SECRET` | ランダムな文字列（`openssl rand -base64 32` で生成するか、社内で管理している値を使用） |
    | `SEED_ADMIN_EMAIL` | 管理者として使いたいメールアドレス（例: 自分の会社のメール） |
    | `SEED_ADMIN_PASSWORD` | 管理者の初期パスワード（8文字以上。あとで画面から変更できません、社内メンバー作成機能から別アカウントを作るのがおすすめです） |
-   | `ANTHROPIC_API_KEY`（任意） | 期首残高画面の「残高証明書のAI読み取り」機能を使う場合のみ設定します。[console.anthropic.com](https://console.anthropic.com/)でアカウントを作成しAPIキーを発行してください（従量課金・読み取り1回あたり数円〜数十円程度）。設定しなくてもそれ以外の機能は通常どおり使えます。 |
+   | `ANTHROPIC_API_KEY`（任意） | 期首残高画面の「残高証明書のAI読み取り」機能を使う場合のみ設定します。[console.anthropic.com](https://console.anthropic.com/)でアカウントを作成しAPIキーを発行してください（従量課金。銘柄コードが証明書に記載されていない場合はAIがネット検索して調べるため、検索が発生した回はやや割高になりますが、読み取り1回あたり数十円程度が目安です）。設定しなくてもそれ以外の機能は通常どおり使えます。 |
 
 7. **公開する**
    アプリ本体のサービスの「Settings」タブの「Networking」→「Generate Domain」を
