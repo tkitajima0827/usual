@@ -1,6 +1,8 @@
 import { requireCurrentBusiness } from "@/lib/business-context";
 import prisma from "@/lib/prisma";
 import OpeningBalanceForm from "./opening-balance-form";
+import CarryForwardForm from "./carry-forward-form";
+import OcrUploadForm from "./ocr-upload-form";
 import DeleteButton from "./delete-button";
 
 export default async function OpeningBalancePage() {
@@ -30,7 +32,11 @@ export default async function OpeningBalancePage() {
       {fiscalPeriods.length === 0 ? (
         <p className="text-sm text-red-600">先に会計期間を作成してください。</p>
       ) : (
-        <OpeningBalanceForm fiscalPeriods={fiscalPeriods.map((fp) => ({ id: fp.id, label: fp.label }))} />
+        <>
+          <CarryForwardForm fiscalPeriods={fiscalPeriods.map((fp) => ({ id: fp.id, label: fp.label }))} />
+          <OcrUploadForm fiscalPeriods={fiscalPeriods.map((fp) => ({ id: fp.id, label: fp.label }))} />
+          <OpeningBalanceForm fiscalPeriods={fiscalPeriods.map((fp) => ({ id: fp.id, label: fp.label }))} />
+        </>
       )}
 
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
